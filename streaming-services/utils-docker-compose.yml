@@ -1,0 +1,52 @@
+version: '3.8'
+
+volumes:
+  portainer_data:
+
+services:
+  organizr:
+    image: organizr/organizr:latest
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./organizr:/config
+    ports:
+      - '80:80'
+    cap_add:
+      - NET_BIND_SERVICE
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - NET_RAW
+      - SETUID
+
+  zerotier:
+    image: zerotier/zerotier:latest
+    restart: unless-stopped
+    volumes:
+      - ./zerotier:/var/lib/zerotier-one
+    devices:
+      - ./dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    network_mode: host
+
+  librespeed:
+    image: lscr.io/linuxserver/librespeed:latest
+    restart: unless-stopped
+    environment:
+      - TZ=America/Sao_Paulo
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./librespeed:/config
+    ports:
+      - '9091:80'

@@ -1,0 +1,48 @@
+services:
+
+  wppconnect-server:
+    build:
+      context: ./wppconnect-server
+      dockerfile: Dockerfile
+    image: wppconnect-server
+    container_name: wppconnect-server
+    hostname: wppconnect-server
+    entrypoint: docker-entrypoint.sh yarn dev
+    networks:
+      - wpp-network
+    tty: true
+  wppconnect-nginx:
+    build:
+      context: ./wppconnect-nginx
+      dockerfile: Dockerfile
+    container_name: wppconnect-nginx
+    hostname: wppconnect-nginx
+    entrypoint: nginx -g "daemon off;"
+    ports:
+      - "8081:8081"
+    networks:
+      - wpp-network
+    depends_on:
+      - wppconnect-server
+    tty: true
+  nossopainel-django:
+    build:
+      context: ./nossopainel-django
+      dockerfile: Dockerfile
+    container_name: nossopainel-django
+    hostname: nossopainel-django
+    networks:
+      - wpp-network
+    volumes:
+      - /e/Docker/ubuntu/nossopainel-django/database:/home/django/database
+    ports:
+      - "8001:8001"
+    environment:
+      - DEBUG=1
+      - DJANGO_ALLOWED_HOSTS=localhost
+      - TZ=America/Bahia
+    tty: true
+
+networks:
+  wpp-network:
+    driver: bridge

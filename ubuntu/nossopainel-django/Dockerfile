@@ -26,7 +26,5 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # Expõe a porta para o servidor
 EXPOSE 8001
 
-RUN apt-get upgrade -y
-
 # Faz as migrações e roda o servidor em um único comando
 CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py runserver 0.0.0.0:8001"]

@@ -27,4 +27,5 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 EXPOSE 8001
 
 # Faz as migrações e roda o servidor em um único comando
-CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py collectstatic && python3 manage.py runserver 0.0.0.0:8001"]
+#CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:8001 setup.wsgi:application"]
+CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py collectstatic --noinput && python3 manage.py runserver 0.0.0.0:8001"]

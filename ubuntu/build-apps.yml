@@ -37,7 +37,7 @@ services:
     networks:
       - wpp-network
     volumes:
-      - /e/Docker/ubuntu/nossopainel-django/database:/home/django/database   
+      - ./Docker/ubuntu/nossopainel-django/database:/home/django/database   
     ports:
       - "8001:8001"
     environment:

@@ -23,8 +23,6 @@ services:
       - "8081:8081"
     networks:
       - wpp-network
-    volumes:
-      - ./nossopainel-django/staticfiles:/usr/share/nginx/html
     depends_on:
       - wppconnect-server
       - nossopainel-django
@@ -40,7 +38,6 @@ services:
       - wpp-network
     volumes:
       - ./nossopainel-django/database:/home/django/database
-      - ./nossopainel-django/staticfiles:/home/django/app/staticfiles
     ports:
       - "8001:8001"
     environment:

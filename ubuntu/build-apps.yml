@@ -23,6 +23,8 @@ services:
       - "8081:8081"
     networks:
       - wpp-network
+    volumes:
+      - ./Docker/ubuntu/nossopainel-django/staticfiles:/usr/share/nginx/html
     depends_on:
       - wppconnect-server
       - nossopainel-django
@@ -37,7 +39,8 @@ services:
     networks:
       - wpp-network
     volumes:
-      - ./Docker/ubuntu/nossopainel-django/database:/home/django/database   
+      - ./Docker/ubuntu/nossopainel-django/database:/home/django/database
+      - ./Docker/ubuntu/nossopainel-django/staticfiles:/home/django/app/staticfiles
     ports:
       - "8001:8001"
     environment:

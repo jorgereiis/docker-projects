@@ -11,7 +11,7 @@ export default {
   maxListeners: 15,
   customUserDataDir: './userDataDir/',
   webhook: {
-    url: "http://nossopainel-django:8001/webhook/",
+    url: "http://nossopainel.com.br:8001/webhook/",
     autoDownload: true,
     uploadS3: false,
     readMessage: true,

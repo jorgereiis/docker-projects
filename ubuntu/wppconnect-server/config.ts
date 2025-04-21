@@ -11,7 +11,7 @@ export default {
   maxListeners: 15,
   customUserDataDir: './userDataDir/',
   webhook: {
-    url: null,
+    url: "http://ubuntu-nossopainel-django:8001/webhook/",
     autoDownload: true,
     uploadS3: false,
     readMessage: true,

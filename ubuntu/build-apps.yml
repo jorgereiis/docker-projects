@@ -20,7 +20,7 @@ services:
     hostname: wppconnect-nginx
     entrypoint: nginx -g "daemon off;"
     ports:
-      - "8081:8081"
+      - "80:80"
     networks:
       - wpp-network
     depends_on:
@@ -39,7 +39,7 @@ services:
     volumes:
       - ./nossopainel-django/database:/home/django/database
     ports:
-      - "8001:8001"
+      - "80:80"
     environment:
       - DEBUG=1
       - DJANGO_ALLOWED_HOSTS=localhost

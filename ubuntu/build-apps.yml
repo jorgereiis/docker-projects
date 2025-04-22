@@ -23,6 +23,8 @@ services:
       - "80:80"
     networks:
       - wpp-network
+    volumes:
+    
     depends_on:
       - wppconnect-server
       - nossopainel-django
@@ -38,6 +40,7 @@ services:
       - wpp-network
     volumes:
       - ./nossopainel-django/database:/home/django/database
+      - ./nossopainel-django/staticfiles:/home/django/staticfiles
     ports:
       - "80:80"
     environment:

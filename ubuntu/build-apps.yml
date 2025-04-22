@@ -24,7 +24,7 @@ services:
     networks:
       - wpp-network
     volumes:
-    
+      - ./nossopainel-django/staticfiles:/usr/share/nginx/html/staticfiles
     depends_on:
       - wppconnect-server
       - nossopainel-django
@@ -41,11 +41,8 @@ services:
     volumes:
       - ./nossopainel-django/database:/home/django/database
       - ./nossopainel-django/staticfiles:/home/django/staticfiles
-    ports:
-      - "80:80"
     environment:
       - DEBUG=1
-      - DJANGO_ALLOWED_HOSTS=localhost
       - TZ=America/Bahia
     tty: true
 

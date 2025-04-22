@@ -11,7 +11,7 @@ export default {
   maxListeners: 15,
   customUserDataDir: './userDataDir/',
   webhook: {
-    url: "http://nossopainel.com.br/webhook/",
+    url: null,
     autoDownload: true,
     uploadS3: false,
     readMessage: true,

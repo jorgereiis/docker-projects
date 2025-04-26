@@ -9,20 +9,20 @@ services:
     hostname: wppconnect-server
     entrypoint: docker-entrypoint.sh yarn dev
     networks:
-      - wpp-network
+      - full-network
     tty: true
 
-  wppconnect-nginx:
+  nginx:
     build:
-      context: ./wppconnect-nginx
+      context: ./nginx
       dockerfile: Dockerfile
-    container_name: wppconnect-nginx
-    hostname: wppconnect-nginx
+    container_name: nginx
+    hostname: nginx
     entrypoint: nginx -g "daemon off;"
     ports:
       - "80:80"
     networks:
-      - wpp-network
+      - full-network
     volumes:
       - ./nossopainel-django/staticfiles:/usr/share/nginx/html/staticfiles
       - ./certbot/www:/var/www/certbot
@@ -39,7 +39,7 @@ services:
     container_name: nossopainel-django
     hostname: nossopainel-django
     networks:
-      - wpp-network
+      - full-network
     volumes:
       - ./nossopainel-django/database:/home/django/database
       - ./nossopainel-django/staticfiles:/home/django/staticfiles
@@ -63,8 +63,8 @@ services:
       -d nossopainel.com.br 
       -d www.nossopainel.com.br"
     networks:
-      - wpp-network
+      - full-network
 
 networks:
-  wpp-network:
+  full-network:
     driver: bridge

@@ -9,7 +9,7 @@ services:
     hostname: wppconnect-server
     entrypoint: docker-entrypoint.sh yarn dev
     networks:
-      - full-network
+      - local-network
     tty: true
 
   nginx:
@@ -22,7 +22,7 @@ services:
     ports:
       - "8081:8081"
     networks:
-      - full-network
+      - local-network
     volumes:
       - ./nossopainel-django/staticfiles:/usr/share/nginx/html/staticfiles
     depends_on:
@@ -37,7 +37,7 @@ services:
     container_name: nossopainel-django
     hostname: nossopainel-django
     networks:
-      - full-network
+      - local-network
     volumes:
       - ./nossopainel-django/database:/home/django/database
       - ./nossopainel-django/staticfiles:/home/django/staticfiles

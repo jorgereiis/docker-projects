@@ -14,7 +14,7 @@ COPY ./config.ts /home/node/app/src
 
 RUN yarn install
 
-FROM node:18-bullseye
+FROM node:22-bullseye
 WORKDIR /home/node/app
 
 # Instalar dependências do sistema operacional

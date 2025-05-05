@@ -27,9 +27,6 @@ services:
       - ./nossopainel-django/staticfiles:/usr/share/nginx/html/staticfiles
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
-    depends_on:
-      - wppconnect-server
-      - nossopainel-django
     tty: true
 
   nossopainel-django:

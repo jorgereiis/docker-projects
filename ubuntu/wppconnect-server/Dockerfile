@@ -1,4 +1,4 @@
-FROM node:18-bullseye as builder
+FROM node:22-bullseye as builder
 
 ENV PORT=21465
 

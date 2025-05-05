@@ -39,7 +39,7 @@ services:
       - public-network
     volumes:
       - ./nossopainel-django/database:/home/django/database
-      - ./nossopainel-django/staticfiles:/home/django/staticfiles
+      - ./nossopainel-django/staticfiles:/home/django/app/staticfiles
     environment:
       - DEBUG=1
       - TZ=America/Bahia

@@ -13,16 +13,14 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /home/django
 
 # Clona o repositório do projeto
-# RUN git clone https://github.com/jorgereiis/nossopainelgestao.git /home/django/app
-WORKDIR /home/django/app
+RUN git clone https://github.com/jorgereiis/nossopainelgestao.git /home/django/app
 
 # Copiar arquivos essenciais para o projeto
 COPY ./.env /home/django/app
 COPY ./database/db.sqlite3 /home/django/app
-COPY ./app/requirements.txt /home/django/app
 
 # Define o diretório de trabalho e instala os requisitos
-#WORKDIR /home/django/app
+WORKDIR /home/django/app
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Expõe a porta para o servidor

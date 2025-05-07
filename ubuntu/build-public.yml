@@ -40,7 +40,6 @@ services:
     volumes:
       - ./nossopainel-django/database:/home/django/database
       - ./nossopainel-django/staticfiles:/home/django/app/staticfiles
-      - ./nossopainel-django/app:/home/django/app
     environment:
       - DEBUG=1
       - TZ=America/Bahia

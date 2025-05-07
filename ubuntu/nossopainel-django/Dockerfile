@@ -14,6 +14,7 @@ WORKDIR /home/django
 
 # Clona o repositório do projeto
 # RUN git clone https://github.com/jorgereiis/nossopainelgestao.git /home/django/app
+WORKDIR /home/django/app
 
 # Copiar arquivos essenciais para o projeto
 COPY ./.env /home/django/app

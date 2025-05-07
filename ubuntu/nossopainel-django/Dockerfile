@@ -22,7 +22,7 @@ COPY ./database/db.sqlite3 /home/django/app
 
 # Define o diretório de trabalho e instala os requisitos
 #WORKDIR /home/django/app
-#RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Expõe a porta para o servidor
 EXPOSE 8001

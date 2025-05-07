@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /home/django
 
 # Clona o repositório do projeto
-RUN git clone https://github.com/jorgereiis/nossopainelgestao.git /home/django/app
+# RUN git clone https://github.com/jorgereiis/nossopainelgestao.git /home/django/app
 
 # Copiar arquivos essenciais para o projeto
 COPY ./.env /home/django/app
@@ -26,6 +26,6 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # Expõe a porta para o servidor
 EXPOSE 8001
 
-# Faz as migrações e roda o servidor em um único comando
+# Faz as migrações e roda o servidor
 #CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:8001 setup.wsgi:application"]
 CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py collectstatic --noinput && python3 manage.py runserver 0.0.0.0:8001"]

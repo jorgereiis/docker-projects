@@ -4,7 +4,7 @@ export default {
   secretKey: 'ThiiisIssMyS33cr333tJRG',
   host: 'http://localhost',
   port: '21465',
-  deviceName: 'Firefox (Linux)',
+  deviceName: 'Firefox',
   poweredBy: 'Mozila',
   startAllSession: true,
   tokenStoreType: 'file',

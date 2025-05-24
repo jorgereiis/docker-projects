@@ -11,6 +11,7 @@ services:
     networks:
       - public-network
     tty: true
+    restart: always
 
   nginx:
     build:
@@ -28,6 +29,7 @@ services:
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
     tty: true
+    restart: always
 
   nossopainel-django:
     build:
@@ -44,6 +46,7 @@ services:
       - DEBUG=1
       - TZ=America/Bahia
     tty: true
+    restart: always
 
   certbot:
     image: certbot/certbot

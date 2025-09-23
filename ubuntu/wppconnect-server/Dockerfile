@@ -1,9 +1,12 @@
-FROM node:22.17.0-bullseye as builder
+FROM node:22.19.0-bullseye as builder
 
 ENV PORT=21465
+ENV SHARP_IGNORE_GLOBAL_LIBVIPS=1
+ENV npm_config_sharp_binary_host=""
 
-RUN apt-get update && \
-    apt-get install -y wget git
+RUN apt-get update && apt-get install -y \
+    wget git build-essential python3 make g++ \
+    libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libvips-dev
 
 WORKDIR /home/node
 RUN git clone https://github.com/wppconnect-team/wppconnect-server.git /home/node/app
@@ -12,13 +15,18 @@ WORKDIR /home/node/app
 
 COPY ./config.ts /home/node/app/src
 
-RUN yarn install --ignore-engines --frozen-lockfile --ignore-optional
+RUN yarn install --frozen-lockfile --ignore-optional \
+ && npm install sharp --build-from-source --force --verbose
 
-FROM node:22.17.0-bullseye
+FROM node:22.19.0-bullseye
 WORKDIR /home/node/app
 
 # Instalar dependências do sistema operacional
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3 \
+    make \
+    g++ \
     curl \
     dirmngr \
     apt-transport-https \
@@ -65,7 +73,12 @@ RUN apt-get update && apt-get install -y \
     libnss3 \
     xdg-utils \
     libxss-dev \
-    libu2f-udev
+    libu2f-udev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    libvips-dev
 
 
 RUN wget -c https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \

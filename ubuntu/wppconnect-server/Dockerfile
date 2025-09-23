@@ -1,4 +1,4 @@
-FROM node:20.19-bullseye as builder
+FROM node:22.17.0-bullseye as builder
 
 ENV PORT=21465
 
@@ -12,9 +12,9 @@ WORKDIR /home/node/app
 
 COPY ./config.ts /home/node/app/src
 
-RUN yarn install
+RUN yarn install --ignore-engines --frozen-lockfile --ignore-optional
 
-FROM node:20.19-bullseye
+FROM node:22.17.0-bullseye
 WORKDIR /home/node/app
 
 # Instalar dependências do sistema operacional

@@ -1,10 +1,9 @@
-FROM node:22.19.0-bullseye as builder
+FROM node:20.19-bullseye as builder
 
 ENV PORT=21465
 
-RUN apt-get update && apt-get install -y \
-    wget git build-essential python3 make g++ \
-    libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libvips-dev
+RUN apt-get update && \
+    apt-get install -y wget git
 
 WORKDIR /home/node
 RUN git clone https://github.com/wppconnect-team/wppconnect-server.git /home/node/app
@@ -13,10 +12,9 @@ WORKDIR /home/node/app
 
 COPY ./config.ts /home/node/app/src
 
-RUN yarn install --frozen-lockfile \
- && npm rebuild sharp --verbose
+RUN yarn install
 
-FROM node:22.19.0-bullseye
+FROM node:20.19-bullseye
 WORKDIR /home/node/app
 
 # Instalar dependências do sistema operacional

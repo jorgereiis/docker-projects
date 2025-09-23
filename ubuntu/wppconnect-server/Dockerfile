@@ -3,6 +3,8 @@ FROM node:22.19.0-bullseye as builder
 ENV PORT=21465
 ENV SHARP_IGNORE_GLOBAL_LIBVIPS=1
 ENV npm_config_sharp_binary_host=""
+ENV npm_config_sharp_binary_platform="linux"
+ENV npm_config_sharp_binary_arch="x64"
 
 RUN apt-get update && apt-get install -y \
     wget git build-essential python3 make g++ \
@@ -16,7 +18,7 @@ WORKDIR /home/node/app
 COPY ./config.ts /home/node/app/src
 
 RUN yarn install --frozen-lockfile --ignore-optional \
- && npm rebuild sharp --build-from-source --force --verbose
+ && find node_modules -type d -name "sharp" -exec npm rebuild sharp --build-from-source --force --verbose --prefix {} \;
 
 FROM node:22.19.0-bullseye
 WORKDIR /home/node/app

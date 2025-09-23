@@ -18,7 +18,8 @@ WORKDIR /home/node/app
 COPY ./config.ts /home/node/app/src
 
 RUN yarn install --frozen-lockfile --ignore-optional \
- && find node_modules -type d -name "sharp" -exec npm rebuild sharp --build-from-source --force --verbose --prefix {} \;
+ && npm rebuild sharp --build-from-source --force --verbose \
+ && rm -rf $(find node_modules -type d -path "*/sharp/vendor")
 
 FROM node:22.19.0-bullseye
 WORKDIR /home/node/app
@@ -80,7 +81,8 @@ RUN apt-get update && apt-get install -y \
     libjpeg-dev \
     libgif-dev \
     librsvg2-dev \
-    libvips-dev
+    libvips-dev \
+    libvips42
 
 
 RUN wget -c https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
@@ -88,4 +90,5 @@ RUN wget -c https://dl.google.com/linux/direct/google-chrome-stable_current_amd6
     && rm google-chrome-stable_current_amd64.deb
 
 COPY --from=builder /home/node/app .
+RUN node -e "console.log('sharp version:', require('sharp').versions)"
 EXPOSE 21465

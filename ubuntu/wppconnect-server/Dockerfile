@@ -16,7 +16,7 @@ WORKDIR /home/node/app
 COPY ./config.ts /home/node/app/src
 
 RUN yarn install --frozen-lockfile --ignore-optional \
- && npm install sharp --build-from-source --force --verbose
+ && npm rebuild sharp --build-from-source --force --verbose
 
 FROM node:22.19.0-bullseye
 WORKDIR /home/node/app

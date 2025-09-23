@@ -3,8 +3,10 @@ FROM node:22.19.0-bookworm as builder
 WORKDIR /home/node/app
 
 # Dependências de compilação
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget git build-essential python3 make g++ \
+    wget unzip fontconfig ca-certificates curl \
+    gnupg dirmngr \
     libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libvips-dev \
     jq \
     && rm -rf /var/lib/apt/lists/*
@@ -34,7 +36,6 @@ WORKDIR /home/node/app
 RUN apt-get update && apt-get install -y \
     build-essential python3 make g++ \
     libvips-dev libvips42 \
-    wget unzip fontconfig ca-certificates curl \
     libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 \
     libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 \
     libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 \

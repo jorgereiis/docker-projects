@@ -5,12 +5,17 @@ WORKDIR /home/node/app
 # Dependências de compilação
 RUN apt-get update && apt-get install -y \
     wget git build-essential python3 make g++ \
-    libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libvips-dev
+    libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libvips-dev \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
 
 # Clonar projeto
 RUN git clone https://github.com/wppconnect-team/wppconnect-server.git .
 
 COPY ./config.ts /home/node/app/src
+
+# Injetar resolução para forçar sharp compatível em TODAS as dependências
+RUN jq '.resolutions.sharp="^0.33.4"' package.json > package.json.tmp && mv package.json.tmp package.json
 
 # Instalar dependências
 RUN yarn install --frozen-lockfile --ignore-optional
@@ -24,6 +29,7 @@ RUN rm -rf node_modules/sharp/vendor \
 FROM node:22.19.0-bullseye
 WORKDIR /home/node/app
 
+# Dependências necessárias no runtime
 RUN apt-get update && apt-get install -y \
     build-essential python3 make g++ \
     libvips-dev libvips42 \
@@ -44,8 +50,9 @@ RUN wget -c https://dl.google.com/linux/direct/google-chrome-stable_current_amd6
 # Copiar do builder
 COPY --from=builder /home/node/app .
 
-# Garantir rebuild do sharp no runtime
-RUN rm -rf node_modules/sharp/vendor \
- && npm rebuild sharp --build-from-source --force --verbose
+# Rebuild de TODOS os sharp dentro da árvore (incluindo os de @wppconnect-team/wppconnect)
+RUN find node_modules -type d -name "sharp" \
+    -exec rm -rf {}/vendor \; \
+    -exec npm rebuild sharp --build-from-source --force --verbose --prefix {} \;
 
 EXPOSE 21465

@@ -1,4 +1,4 @@
-FROM node:22.19.0-bullseye as builder
+FROM node:22.19.0-bookworm as builder
 
 WORKDIR /home/node/app
 
@@ -27,7 +27,7 @@ RUN rm -rf node_modules/sharp/vendor \
 
 # -----------------------------------------
 
-FROM node:22.19.0-bullseye
+FROM node:22.19.0-bookworm
 WORKDIR /home/node/app
 
 # Dependências necessárias no runtime

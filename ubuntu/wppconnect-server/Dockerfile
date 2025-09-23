@@ -90,4 +90,12 @@ RUN wget -c https://dl.google.com/linux/direct/google-chrome-stable_current_amd6
     && rm google-chrome-stable_current_amd64.deb
 
 COPY --from=builder /home/node/app .
+
+RUN rm -rf node_modules/sharp/vendor \
+ && npm rebuild sharp --build-from-source --force --verbose
+
+RUN find node_modules -type d -name "sharp" \
+       -exec npm rebuild sharp --build-from-source --force --verbose --prefix {} \; \
+    && find node_modules -type d -name "vendor" -exec rm -rf {} +
+
 EXPOSE 21465

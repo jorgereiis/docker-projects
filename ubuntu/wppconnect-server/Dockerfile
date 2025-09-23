@@ -2,9 +2,9 @@ FROM node:22.19.0-bullseye as builder
 
 ENV PORT=21465
 
-RUN apt-get update && \
-    apt-get install -y wget git build-essential python3 make g++ \
-    libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+RUN apt-get update && apt-get install -y \
+    wget git build-essential python3 make g++ \
+    libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libvips-dev
 
 WORKDIR /home/node
 RUN git clone https://github.com/wppconnect-team/wppconnect-server.git /home/node/app

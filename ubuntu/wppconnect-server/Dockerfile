@@ -1,4 +1,4 @@
-FROM node:22.17.0-bullseye as builder
+FROM node:22.19.0-bullseye as builder
 
 ENV PORT=21465
 
@@ -14,7 +14,7 @@ COPY ./config.ts /home/node/app/src
 
 RUN yarn install
 
-FROM node:22.17.0-bullseye
+FROM node:22.19.0-bullseye
 WORKDIR /home/node/app
 
 # Instalar dependências do sistema operacional

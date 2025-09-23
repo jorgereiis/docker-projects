@@ -1,6 +1,10 @@
 FROM node:22.19.0-bullseye as builder
 
 ENV PORT=21465
+ENV SHARP_IGNORE_GLOBAL_LIBVIPS=1
+ENV npm_config_sharp_binary_host=""
+ENV npm_config_sharp_binary_platform="linux"
+ENV npm_config_sharp_binary_arch="x64"
 
 RUN apt-get update && apt-get install -y \
     wget git build-essential python3 make g++ \
@@ -8,6 +12,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /home/node
 RUN git clone https://github.com/wppconnect-team/wppconnect-server.git /home/node/app
+
+WORKDIR /home/node/app
+
+COPY ./config.ts /home/node/app/src
+
+RUN yarn install --frozen-lockfile --ignore-optional \
+ && npm rebuild sharp --build-from-source --force --verbose \
+ && rm -rf $(find node_modules -type d -path "*/sharp/vendor")
 
 FROM node:22.19.0-bullseye
 WORKDIR /home/node/app
@@ -73,6 +85,9 @@ RUN apt-get update && apt-get install -y \
     libvips42
 
 
+RUN wget -c https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && dpkg -i google-chrome-stable_current_amd64.deb || apt-get install -f \
+    && rm google-chrome-stable_current_amd64.deb
 
 COPY --from=builder /home/node/app .
 

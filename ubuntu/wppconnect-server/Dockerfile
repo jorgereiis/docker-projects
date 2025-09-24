@@ -1,4 +1,4 @@
-FROM node:20-buster as builder
+FROM node:20-bullseye as builder
 
 ENV PORT=21465
 ENV YARN_IGNORE_ENGINE=true
@@ -16,7 +16,7 @@ COPY ./config.ts /home/node/app/src
 
 RUN yarn install --ignore-engines
 
-FROM node:20-buster
+FROM node:20-bullseye
 WORKDIR /home/node/app
 
 # Instalar dependências do sistema operacional
@@ -75,4 +75,5 @@ RUN wget -c https://dl.google.com/linux/direct/google-chrome-stable_current_amd6
     && rm google-chrome-stable_current_amd64.deb
 
 COPY --from=builder /home/node/app .
+RUN npm rebuild sharp --build-from-source
 EXPOSE 21465

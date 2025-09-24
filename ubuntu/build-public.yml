@@ -7,7 +7,6 @@ services:
     image: wppconnect-server
     container_name: wppconnect-server
     hostname: wppconnect-server
-    entrypoint: ["npx", "tsx", "watch", "src/server.ts"]
     networks:
       - public-network
     volumes:

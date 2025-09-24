@@ -1,6 +1,7 @@
 FROM node:22.17.0-bullseye as builder
 
 ENV PORT=21465
+ENV YARN_IGNORE_ENGINE=true
 
 RUN apt-get update && \
     apt-get install -y build-essential python3 make g++ \

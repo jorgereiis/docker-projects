@@ -7,7 +7,7 @@ services:
     image: wppconnect-server
     container_name: wppconnect-server
     hostname: wppconnect-server
-    entrypoint: docker-entrypoint.sh yarn dev
+    entrypoint: ["sh", "-c", "YARN_IGNORE_ENGINE=true yarn dev"]
     networks:
       - public-network
     volumes:

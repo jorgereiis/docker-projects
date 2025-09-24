@@ -1,9 +1,10 @@
-FROM node:22.19.0-bullseye as builder
+FROM node:22.19.0-buster as builder
 
 ENV PORT=21465
 
 RUN apt-get update && \
-    apt-get install -y wget git
+    apt-get install -y build-essential python3 make g++ \
+    && npm rebuild sharp --build-from-source
 
 WORKDIR /home/node
 RUN git clone https://github.com/wppconnect-team/wppconnect-server.git /home/node/app
@@ -14,7 +15,7 @@ COPY ./config.ts /home/node/app/src
 
 RUN yarn install
 
-FROM node:22.19.0-bullseye
+FROM node:22.19.0-buster
 WORKDIR /home/node/app
 
 # Instalar dependências do sistema operacional

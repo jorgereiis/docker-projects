@@ -1,4 +1,4 @@
-FROM node:22.17.0-bullseye as builder
+FROM node:22-buster as builder
 
 ENV PORT=21465
 ENV YARN_IGNORE_ENGINE=true
@@ -16,7 +16,7 @@ COPY ./config.ts /home/node/app/src
 
 RUN yarn install --ignore-engines
 
-FROM node:22.17.0-bullseye
+FROM node:22-buster
 WORKDIR /home/node/app
 
 # Instalar dependências do sistema operacional

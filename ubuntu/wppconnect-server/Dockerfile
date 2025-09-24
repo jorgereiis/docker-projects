@@ -13,7 +13,7 @@ WORKDIR /home/node/app
 
 COPY ./config.ts /home/node/app/src
 
-RUN yarn install
+RUN yarn install --ignore-engines
 
 FROM node:22.17.0-bullseye
 WORKDIR /home/node/app

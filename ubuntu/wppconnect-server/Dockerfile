@@ -14,7 +14,7 @@ WORKDIR /home/node/app
 COPY ./config.ts /home/node/app/src
 
 # Compila para dist/
-RUN yarn build
+RUN yarn build --ignore-engines
 
 # ------------------------------------------------------------------
 

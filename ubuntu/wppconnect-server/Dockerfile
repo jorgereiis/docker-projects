@@ -1,40 +1,24 @@
 FROM node:22.19.0-bullseye as builder
 
+ENV PORT=21465
+
+RUN apt-get update && \
+    apt-get install -y wget git
+
+WORKDIR /home/node
+RUN git clone https://github.com/wppconnect-team/wppconnect-server.git /home/node/app
+
 WORKDIR /home/node/app
 
-# Dependências de compilação
-RUN apt-get update && apt-get install -y \
-    wget git build-essential python3 make g++ \
-    libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libvips-dev
-
-
-# Clonar projeto
-RUN git clone https://github.com/wppconnect-team/wppconnect-server.git .
-
-# Copiar config customizada
 COPY ./config.ts /home/node/app/src
 
-# Injetar resolução para forçar sharp compatível em TODAS as dependências
-RUN jq '.resolutions.sharp="^0.33.5"' package.json > package.json.tmp && mv package.json.tmp package.json
-
-# Instalar dependências
-RUN yarn install --frozen-lockfile --ignore-optional
-
-# Forçar sharp compatível já no build
-RUN rm -rf node_modules/sharp/vendor \
- && npm install sharp@^0.33.4 --build-from-source --force --verbose
-
-# -----------------------------------------
+RUN yarn install
 
 FROM node:22.19.0-bullseye
 WORKDIR /home/node/app
 
-# Dependências necessárias no runtime
+# Instalar dependências do sistema operacional
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    python3 \
-    make \
-    g++ \
     curl \
     dirmngr \
     apt-transport-https \
@@ -81,25 +65,12 @@ RUN apt-get update && apt-get install -y \
     libnss3 \
     xdg-utils \
     libxss-dev \
-    libu2f-udev \
-    libpango1.0-dev \
-    libjpeg-dev \
-    libgif-dev \
-    librsvg2-dev \
-    libvips-dev \
-    libvips42
+    libu2f-udev
 
-# Chrome
+
 RUN wget -c https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-    && dpkg -i google-chrome-stable_current_amd64.deb || apt-get -fy install \
+    && dpkg -i google-chrome-stable_current_amd64.deb || apt-get install -f \
     && rm google-chrome-stable_current_amd64.deb
 
-# Copiar do builder
 COPY --from=builder /home/node/app .
-
-# Remover sharp duplicado dentro de @wppconnect e deduplicar dependências
-RUN rm -rf node_modules/@wppconnect-team/wppconnect/node_modules/sharp \
- && npm dedupe \
- && npm install sharp@^0.33.5 --build-from-source --force --verbose
-
 EXPOSE 21465

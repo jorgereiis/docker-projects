@@ -21,6 +21,7 @@ RUN git clone https://github.com/jorgereiis/nossopainelgestao.git /home/django/a
 
 RUN mkdir /home/django/app/logs
 RUN touch /home/django/app/logs/error.log
+RUN mkdir -p /home/django/app/logs/Scheduler
 
 # Define o diretório de trabalho e instala os requisitos
 WORKDIR /home/django/app
@@ -33,7 +34,45 @@ EXPOSE 8001
 #CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:8001 setup.wsgi:application"]
 #CMD ["sh", "-c", "python3 manage.py makemigrations --merge && python3 manage.py migrate && python3 manage.py collectstatic --noinput && python3 manage.py runserver 0.0.0.0:8001"]
 
-# Criar script de inicialização
+# Configuração do supervisord
+RUN echo '[supervisord]\n\
+nodaemon=true\n\
+logfile=/var/log/supervisor/supervisord.log\n\
+pidfile=/var/run/supervisord.pid\n\
+loglevel=info\n\
+\n\
+[program:gunicorn]\n\
+command=gunicorn setup.wsgi:application --bind 0.0.0.0:8001 --workers 3 --threads 2 --worker-class sync --timeout 120 --max-requests 1000 --max-requests-jitter 50 --access-logfile - --error-logfile - --log-level info --name nossopainel-django\n\
+directory=/home/django/app\n\
+autostart=true\n\
+autorestart=true\n\
+stdout_logfile=/dev/stdout\n\
+stdout_logfile_maxbytes=0\n\
+stderr_logfile=/dev/stderr\n\
+stderr_logfile_maxbytes=0\n\
+priority=1\n\
+startsecs=10\n\
+stopwaitsecs=30\n\
+\n\
+[program:agendamentos]\n\
+command=python3 scripts/agendamentos.py\n\
+directory=/home/django/app\n\
+autostart=true\n\
+autorestart=true\n\
+stdout_logfile=/home/django/app/logs/Scheduler/agendamentos_stdout.log\n\
+stderr_logfile=/home/django/app/logs/Scheduler/agendamentos_stderr.log\n\
+stdout_logfile_maxbytes=10MB\n\
+stderr_logfile_maxbytes=10MB\n\
+stdout_logfile_backups=3\n\
+stderr_logfile_backups=3\n\
+priority=2\n\
+startsecs=10\n\
+stopwaitsecs=60\n\
+killasgroup=true\n\
+stopasgroup=true\n\
+' > /etc/supervisor/conf.d/django.conf
+
+# Script de inicialização
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
@@ -47,10 +86,11 @@ if [ "$DEBUG" = "True" ]; then\n\
 fi\n\
 \n\
 # Criar migrations\n\
+echo "📦 Criando migrations..."\n\
 python3 manage.py makemigrations --merge || {\n\
-    echo "❌ Erro ao criar migrations!"\n\
-    exit 1\n\
+    echo "⚠️  Aviso: Problema ao criar migrations (continuando...)"\n\
 }\n\
+\n\
 echo "📦 Aplicando migrations do banco de dados..."\n\
 python3 manage.py migrate --noinput || {\n\
     echo "❌ Erro ao aplicar migrations!"\n\
@@ -65,28 +105,31 @@ python3 manage.py collectstatic --noinput --clear || {\n\
 }\n\
 \n\
 echo ""\n\
-echo "✅ Inicializando Gunicorn..."\n\
-echo "   Workers: 3"\n\
-echo "   Threads por worker: 2"\n\
-echo "   Bind: 0.0.0.0:8001"\n\
-echo "   Timeout: 120s"\n\
+echo "✅ Inicializando serviços com Supervisor..."\n\
+echo "   📡 Gunicorn:"\n\
+echo "      • Workers: 3"\n\
+echo "      • Threads por worker: 2"\n\
+echo "      • Bind: 0.0.0.0:8001"\n\
+echo "      • Timeout: 120s"\n\
+echo "   ⏰ Agendamentos (scripts/agendamentos.py):"\n\
+echo "      • 08:00 - GP Futebol"\n\
+echo "      • 10:00 - GP Vendas (manhã)"\n\
+echo "      • 12:00 - Scheduled Tasks"\n\
+echo "      • 17:00 - Mensalidades Canceladas"\n\
+echo "      • 20:00 - GP Vendas (noite)"\n\
+echo "      • 23:00 - Telegram Connection"\n\
+echo "      • 23:50 - Upload Telegram"\n\
+echo "      • A cada 60min - Backup DB"\n\
+echo "      • A cada 1min - Envios Agendados"\n\
+echo "   📋 Logs:"\n\
+echo "      • Gunicorn: stdout/stderr"\n\
+echo "      • Agendamentos: logs/Scheduler/"\n\
+echo "      • Supervisor: /var/log/supervisor/"\n\
 echo "================================================"\n\
 echo ""\n\
 \n\
-# Iniciar Gunicorn\n\
-exec gunicorn setup.wsgi:application \\\n\
-    --bind 0.0.0.0:8001 \\\n\
-    --workers 3 \\\n\
-    --threads 2 \\\n\
-    --worker-class sync \\\n\
-    --timeout 120 \\\n\
-    --max-requests 1000 \\\n\
-    --max-requests-jitter 50 \\\n\
-    --access-logfile - \\\n\
-    --error-logfile - \\\n\
-    --log-level info \\\n\
-    --name nossopainel-django\n\
+# Iniciar Supervisor\n\
+exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf\n\
 ' > /home/django/app/start.sh && chmod +x /home/django/app/start.sh
 
-# Comando de inicialização
 CMD ["/home/django/app/start.sh"]

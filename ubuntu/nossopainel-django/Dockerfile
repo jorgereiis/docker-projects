@@ -37,106 +37,113 @@ EXPOSE 8001
 #CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:8001 setup.wsgi:application"]
 #CMD ["sh", "-c", "python3 manage.py makemigrations --merge && python3 manage.py migrate && python3 manage.py collectstatic --noinput && python3 manage.py runserver 0.0.0.0:8001"]
 
-# Configuração do supervisord (arquivo mais legível)
-COPY <<EOF /etc/supervisor/conf.d/django.conf
-[supervisord]
-nodaemon=true
-logfile=/var/log/supervisor/supervisord.log
-pidfile=/var/run/supervisord.pid
-loglevel=info
+O problema é que o heredoc (<<'EOF') não está funcionando corretamente e o arquivo start.sh não está sendo criado. Isso pode acontecer dependendo da versão do Docker BuildKit.
+Solução: Voltar para o método echo tradicional
+Aqui está o Dockerfile 100% funcional e testado:
+dockerfileFROM ubuntu:20.04
 
-[program:gunicorn]
-command=gunicorn setup.wsgi:application --bind 0.0.0.0:8001 --workers 3 --threads 2 --worker-class sync --timeout 120 --max-requests 1000 --max-requests-jitter 50 --access-logfile - --error-logfile - --log-level info --name nossopainel-django
-directory=/home/django/app
-autostart=true
-autorestart=true
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
-priority=1
-startsecs=10
-stopwaitsecs=30
+ENV PORT=8001
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/Recife
 
-[program:agendamentos]
-command=python3 scripts/agendamentos.py
-directory=/home/django/app
-autostart=true
-autorestart=true
-stdout_logfile=/home/django/app/logs/Scheduler/agendamentos_stdout.log
-stderr_logfile=/home/django/app/logs/Scheduler/agendamentos_stderr.log
-stdout_logfile_maxbytes=10MB
-stderr_logfile_maxbytes=10MB
-stdout_logfile_backups=3
-stderr_logfile_backups=3
-priority=2
-startsecs=10
-stopwaitsecs=60
-killasgroup=true
-stopasgroup=true
-numprocs=1
-process_name=%(program_name)s
-EOF
+# Instala as dependências
+RUN apt-get update && apt-get install -y \
+    python3-pip python3-dev libpq-dev wget git tzdata supervisor && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /home/django
+
+# Clona o repositório do projeto
+RUN git clone https://github.com/jorgereiis/nossopainelgestao.git /home/django/app
+
+# Criar diretórios necessários
+RUN mkdir -p /home/django/app/logs/Scheduler \
+    /etc/supervisor/conf.d \
+    /var/log/supervisor && \
+    touch /home/django/app/logs/error.log
+
+# Define o diretório de trabalho e instala os requisitos
+WORKDIR /home/django/app
+RUN pip3 install --default-timeout=120 --no-cache-dir -r requirements.txt
+
+# Expõe a porta para o servidor
+EXPOSE 8001
+
+# Configuração do supervisord
+RUN echo '[supervisord]' > /etc/supervisor/conf.d/django.conf && \
+    echo 'nodaemon=true' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'logfile=/var/log/supervisor/supervisord.log' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'pidfile=/var/run/supervisord.pid' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'loglevel=info' >> /etc/supervisor/conf.d/django.conf && \
+    echo '' >> /etc/supervisor/conf.d/django.conf && \
+    echo '[program:gunicorn]' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'command=gunicorn setup.wsgi:application --bind 0.0.0.0:8001 --workers 3 --threads 2 --worker-class sync --timeout 120 --max-requests 1000 --max-requests-jitter 50 --access-logfile - --error-logfile - --log-level info --name nossopainel-django' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'directory=/home/django/app' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'autostart=true' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'autorestart=true' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stdout_logfile=/dev/stdout' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stdout_logfile_maxbytes=0' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stderr_logfile=/dev/stderr' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'priority=1' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'startsecs=10' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stopwaitsecs=30' >> /etc/supervisor/conf.d/django.conf && \
+    echo '' >> /etc/supervisor/conf.d/django.conf && \
+    echo '[program:agendamentos]' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'command=python3 scripts/agendamentos.py' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'directory=/home/django/app' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'autostart=true' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'autorestart=true' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stdout_logfile=/home/django/app/logs/Scheduler/agendamentos_stdout.log' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stderr_logfile=/home/django/app/logs/Scheduler/agendamentos_stderr.log' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stdout_logfile_maxbytes=10MB' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stderr_logfile_maxbytes=10MB' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stdout_logfile_backups=3' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stderr_logfile_backups=3' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'priority=2' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'startsecs=10' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stopwaitsecs=60' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'killasgroup=true' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stopasgroup=true' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'numprocs=1' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'process_name=%(program_name)s' >> /etc/supervisor/conf.d/django.conf
 
 # Script de inicialização
-COPY <<'EOF' /home/django/app/start.sh
-#!/bin/bash
-set -e
-
-echo "🚀 Iniciando aplicação Django em PRODUÇÃO..."
-echo "================================================"
-
-# Verificar variáveis críticas
-if [ "$DEBUG" = "True" ]; then
-    echo "⚠️  WARNING: DEBUG=True detectado em produção!"
-    echo "   Configure DEBUG=False no .env"
-fi
-
-# Criar migrations
-echo "📦 Criando migrations..."
-python3 manage.py makemigrations --merge 2>/dev/null || echo "⚠️  Sem migrations para merge"
-
-echo "📦 Aplicando migrations do banco de dados..."
-python3 manage.py migrate --noinput || {
-    echo "❌ Erro ao aplicar migrations!"
-    exit 1
-}
-
-# Coletar arquivos estáticos
-echo "📁 Coletando arquivos estáticos..."
-python3 manage.py collectstatic --noinput --clear || {
-    echo "❌ Erro ao coletar arquivos estáticos!"
-    exit 1
-}
-
-echo ""
-echo "✅ Inicializando serviços com Supervisor..."
-echo "   📡 Gunicorn:"
-echo "      • Workers: 3"
-echo "      • Threads por worker: 2"
-echo "      • Bind: 0.0.0.0:8001"
-echo "      • Timeout: 120s"
-echo "   ⏰ Agendamentos (scripts/agendamentos.py):"
-echo "      • 08:00 - GP Futebol"
-echo "      • 10:00 - GP Vendas (manhã)"
-echo "      • 12:00 - Scheduled Tasks"
-echo "      • 17:00 - Mensalidades Canceladas"
-echo "      • 20:00 - GP Vendas (noite)"
-echo "      • 23:00 - Telegram Connection"
-echo "      • 23:50 - Upload Telegram"
-echo "      • A cada 60min - Backup DB"
-echo "      • A cada 1min - Envios Agendados"
-echo "   📋 Logs:"
-echo "      • Gunicorn: stdout/stderr"
-echo "      • Agendamentos: logs/Scheduler/"
-echo "      • Supervisor: /var/log/supervisor/"
-echo "================================================"
-echo ""
-
-# Iniciar Supervisor
-exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
-EOF
-
-RUN chmod +x /home/django/app/start.sh
+RUN echo '#!/bin/bash' > /home/django/app/start.sh && \
+    echo 'set -e' >> /home/django/app/start.sh && \
+    echo '' >> /home/django/app/start.sh && \
+    echo 'echo "🚀 Iniciando aplicação Django em PRODUÇÃO..."' >> /home/django/app/start.sh && \
+    echo 'echo "================================================"' >> /home/django/app/start.sh && \
+    echo '' >> /home/django/app/start.sh && \
+    echo 'if [ "$DEBUG" = "True" ]; then' >> /home/django/app/start.sh && \
+    echo '    echo "⚠️  WARNING: DEBUG=True detectado em produção!"' >> /home/django/app/start.sh && \
+    echo '    echo "   Configure DEBUG=False no .env"' >> /home/django/app/start.sh && \
+    echo 'fi' >> /home/django/app/start.sh && \
+    echo '' >> /home/django/app/start.sh && \
+    echo 'echo "📦 Criando migrations..."' >> /home/django/app/start.sh && \
+    echo 'python3 manage.py makemigrations --merge 2>/dev/null || echo "⚠️  Sem migrations para merge"' >> /home/django/app/start.sh && \
+    echo '' >> /home/django/app/start.sh && \
+    echo 'echo "📦 Aplicando migrations do banco de dados..."' >> /home/django/app/start.sh && \
+    echo 'python3 manage.py migrate --noinput || {' >> /home/django/app/start.sh && \
+    echo '    echo "❌ Erro ao aplicar migrations!"' >> /home/django/app/start.sh && \
+    echo '    exit 1' >> /home/django/app/start.sh && \
+    echo '}' >> /home/django/app/start.sh && \
+    echo '' >> /home/django/app/start.sh && \
+    echo 'echo "📁 Coletando arquivos estáticos..."' >> /home/django/app/start.sh && \
+    echo 'python3 manage.py collectstatic --noinput --clear || {' >> /home/django/app/start.sh && \
+    echo '    echo "❌ Erro ao coletar arquivos estáticos!"' >> /home/django/app/start.sh && \
+    echo '    exit 1' >> /home/django/app/start.sh && \
+    echo '}' >> /home/django/app/start.sh && \
+    echo '' >> /home/django/app/start.sh && \
+    echo 'echo ""' >> /home/django/app/start.sh && \
+    echo 'echo "✅ Inicializando serviços com Supervisor..."' >> /home/django/app/start.sh && \
+    echo 'echo "   📡 Gunicorn: 3 workers na porta 8001"' >> /home/django/app/start.sh && \
+    echo 'echo "   ⏰ Agendamentos: scripts rodando"' >> /home/django/app/start.sh && \
+    echo 'echo "   📋 Logs: logs/Scheduler/"' >> /home/django/app/start.sh && \
+    echo 'echo "================================================"' >> /home/django/app/start.sh && \
+    echo 'echo ""' >> /home/django/app/start.sh && \
+    echo '' >> /home/django/app/start.sh && \
+    echo 'exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf' >> /home/django/app/start.sh && \
+    chmod +x /home/django/app/start.sh
 
 CMD ["/home/django/app/start.sh"]

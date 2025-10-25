@@ -47,7 +47,7 @@ if [ "$DEBUG" = "True" ]; then\n\
 fi\n\
 \n\
 # Criar migrations\n\
-python manage.py makemigrations --merge || {\n\
+python3 manage.py makemigrations --merge || {\n\
     echo "❌ Erro ao criar migrations!"\n\
     exit 1\n\
 }\n\

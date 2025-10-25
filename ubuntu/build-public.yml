@@ -43,7 +43,6 @@ services:
     networks:
       - public-network
     volumes:
-      - ./nossopainel-django/logs:/home/django/logs
       - ./nossopainel-django/.env:/home/django/app/.env
       - ./nossopainel-django/database:/home/django/database
       - ./nossopainel-django/mediafiles:/home/django/app/media

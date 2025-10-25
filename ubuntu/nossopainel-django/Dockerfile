@@ -37,38 +37,6 @@ EXPOSE 8001
 #CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:8001 setup.wsgi:application"]
 #CMD ["sh", "-c", "python3 manage.py makemigrations --merge && python3 manage.py migrate && python3 manage.py collectstatic --noinput && python3 manage.py runserver 0.0.0.0:8001"]
 
-O problema é que o heredoc (<<'EOF') não está funcionando corretamente e o arquivo start.sh não está sendo criado. Isso pode acontecer dependendo da versão do Docker BuildKit.
-Solução: Voltar para o método echo tradicional
-Aqui está o Dockerfile 100% funcional e testado:
-dockerfileFROM ubuntu:20.04
-
-ENV PORT=8001
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=America/Recife
-
-# Instala as dependências
-RUN apt-get update && apt-get install -y \
-    python3-pip python3-dev libpq-dev wget git tzdata supervisor && \
-    rm -rf /var/lib/apt/lists/*
-
-WORKDIR /home/django
-
-# Clona o repositório do projeto
-RUN git clone https://github.com/jorgereiis/nossopainelgestao.git /home/django/app
-
-# Criar diretórios necessários
-RUN mkdir -p /home/django/app/logs/Scheduler \
-    /etc/supervisor/conf.d \
-    /var/log/supervisor && \
-    touch /home/django/app/logs/error.log
-
-# Define o diretório de trabalho e instala os requisitos
-WORKDIR /home/django/app
-RUN pip3 install --default-timeout=120 --no-cache-dir -r requirements.txt
-
-# Expõe a porta para o servidor
-EXPOSE 8001
-
 # Configuração do supervisord
 RUN echo '[supervisord]' > /etc/supervisor/conf.d/django.conf && \
     echo 'nodaemon=true' >> /etc/supervisor/conf.d/django.conf && \

@@ -18,9 +18,6 @@ RUN chmod +x /docker-entrypoint-initdb.d/init-db.sh
 COPY backup-cron.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/backup-cron.sh
 
-# Configura cron para backup diário às 3h da manhã
-RUN echo "0 3 * * * /usr/local/bin/backup-cron.sh >> /var/log/mysql-backup.log 2>&1" | crontab -
-
 # Cria diretório de backups
 RUN mkdir -p /backups && chmod 755 /backups
 

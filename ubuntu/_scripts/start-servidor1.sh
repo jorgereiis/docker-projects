@@ -58,6 +58,7 @@ echo -e "\n${YELLOW}════════════════════
 echo -e "${YELLOW}ETAPA 1: Inicializando MySQL${NC}"
 echo -e "${YELLOW}════════════════════════════════════════════════════════════${NC}"
 
+# compose
 docker compose -f mysql-build.yml up -d
 
 echo -e "${YELLOW}➤ Aguardando MySQL ficar pronto (healthcheck)...${NC}"
@@ -87,6 +88,7 @@ echo -e "\n${YELLOW}════════════════════
 echo -e "${YELLOW}ETAPA 2: Inicializando Django, Nginx e Certbot${NC}"
 echo -e "${YELLOW}════════════════════════════════════════════════════════════${NC}"
 
+# compose
 docker compose -f django-build.yml up -d
 
 echo -e "${YELLOW}➤ Aguardando Django ficar pronto (healthcheck)...${NC}"

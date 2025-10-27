@@ -7,7 +7,7 @@ ENV TZ=America/Recife
 
 # Instala timezone data e cron para backups automáticos
 RUN apt-get update && apt-get install -y \
-    python3-pip python3-dev libpq-dev wget git tzdata supervisor && \
+    python3-pip python3-dev libpq-dev wget git tzdata supervisor nano && \
     rm -rf /var/lib/apt/lists/*
 
 # Copia configurações customizadas do MySQL

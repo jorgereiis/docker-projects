@@ -1,4 +1,4 @@
-FROM mysql:8.0-oracle
+FROM mysql:5.7
 
 # Define variáveis de ambiente
 ENV MYSQL_DATABASE=nossopaineldb

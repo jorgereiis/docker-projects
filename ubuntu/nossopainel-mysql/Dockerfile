@@ -5,10 +5,7 @@ ENV MYSQL_DATABASE=nossopaineldb
 ENV TZ=America/Recife
 
 # Instala timezone data e cron para backups automáticos
-RUN apt-get update && \
-    apt-get install -y tzdata cron && \
-    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
-    echo $TZ > /etc/timezone && \
+RUN apt-get update
 
 # Copia configurações customizadas do MySQL
 COPY my.cnf /etc/mysql/conf.d/custom.cnf

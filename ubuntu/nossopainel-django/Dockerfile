@@ -16,10 +16,6 @@ WORKDIR /home/django
 # Clona o repositório do projeto
 RUN git clone https://github.com/jorgereiis/nossopainelgestao.git /home/django/app
 
-# Copiar arquivos essenciais para o projeto
-#COPY ./.env /home/django/app
-#COPY ./database/db.sqlite3 /home/django/app
-
 RUN mkdir /home/django/app/logs
 RUN touch /home/django/app/logs/error.log
 RUN mkdir -p /home/django/app/logs/Scheduler
@@ -32,10 +28,6 @@ RUN pip3 install --default-timeout=120 --no-cache-dir -r requirements.txt
 
 # Expõe a porta para o servidor
 EXPOSE 8001
-
-# Faz as migrações e roda o servidor
-#CMD ["sh", "-c", "python3 manage.py makemigrations && python3 manage.py migrate && python3 manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:8001 setup.wsgi:application"]
-#CMD ["sh", "-c", "python3 manage.py makemigrations --merge && python3 manage.py migrate && python3 manage.py collectstatic --noinput && python3 manage.py runserver 0.0.0.0:8001"]
 
 # Configuração do supervisord
 RUN echo '[supervisord]' > /etc/supervisor/conf.d/django.conf && \

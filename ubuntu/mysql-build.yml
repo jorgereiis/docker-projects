@@ -1,0 +1,82 @@
+# ============================================
+# MySQL Container - Nosso Painel Gestão
+# SERVIDOR 1: Django + MySQL + Nginx + Certbot
+# ============================================
+
+services:
+
+  nossopainel-mysql:
+    build:
+      context: ./nossopainel-mysql
+      dockerfile: Dockerfile
+    container_name: nossopainel-mysql
+    hostname: nossopainel-mysql
+
+    # ========================================
+    # VARIÁVEIS DE AMBIENTE (use .env file)
+    # ========================================
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=nossopaineldb
+      - MYSQL_USER=${MYSQL_USER:-nossopaineluser}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - TZ=America/Recife
+
+    # ========================================
+    # REDES (APENAS INTERNA - NÃO EXPOR!)
+    # ========================================
+    networks:
+      - database-network  # Rede interna (internal: true)
+
+    # ========================================
+    # VOLUMES PERSISTENTES
+    # ========================================
+    volumes:
+      # Dados do MySQL (persistente)
+      - ./nossopainel-mysql/data:/var/lib/mysql
+      - ./nossopainel-mysql/nossopaineldb.sql:/docker-entrypoint-initdb.d/nossopaineldb.sql:ro
+      
+      # Backups automáticos (cron diário às 3h)
+      - ./nossopainel-mysql/backups:/backups
+
+      # Logs do MySQL
+      - ./nossopainel-mysql/logs:/var/log/mysql
+
+    # ========================================
+    # HEALTHCHECK
+    # ========================================
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    # ========================================
+    # RESTART POLICY
+    # ========================================
+    restart: always
+
+    # ========================================
+    # SEGURANÇA: NÃO EXPOR PORTA 3306!
+    # ========================================
+    # ports:
+    #   - "3306:3306"
+    #
+    # MySQL acessível APENAS por containers na rede 'database-network'
+
+    tty: true
+
+# ============================================
+# REDES - Segregação de acesso
+# ============================================
+networks:
+
+  # Rede pública (Nginx, Django, Certbot)
+  public-network:
+    driver: bridge
+
+  # Rede de banco de dados (INTERNA - MySQL + Django apenas)
+  database-network:
+    driver: bridge
+    internal: true

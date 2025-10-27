@@ -1,0 +1,126 @@
+# ============================================
+# Django + Nginx + Certbot - Nosso Painel Gestão
+# SERVIDOR 1: Django + MySQL + Nginx + Certbot
+# ============================================
+
+services:
+
+  # ==========================================
+  # NGINX - Reverse Proxy & Static Files
+  # ==========================================
+  nossopainel-nginx:
+    build:
+      context: ./nossopainel-nginx
+      dockerfile: Dockerfile
+    container_name: nossopainel-nginx
+    hostname: nossopainel-nginx
+    entrypoint: nginx -g "daemon off;"
+
+    # Depende do Django estar rodando
+    depends_on:
+      nossopainel-django:
+        condition: service_healthy
+
+    ports:
+      - "80:80"
+
+    networks:
+      - public-network
+
+    volumes:
+      - ./nossopainel-certbot/www:/var/www/certbot
+      - ./nossopainel-certbot/conf:/etc/letsencrypt
+      - ./nossopainel-django/mediafiles:/usr/share/nginx/html/media
+      - ./nossopainel-django/staticfiles:/usr/share/nginx/html/staticfiles
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    tty: true
+    restart: always
+
+  # ==========================================
+  # DJANGO - Aplicação Principal
+  # ==========================================
+  nossopainel-django:
+    build:
+      context: ./nossopainel-django
+      dockerfile: Dockerfile
+    container_name: nossopainel-django
+    hostname: nossopainel-django
+
+    # Depende do MySQL estar pronto
+    depends_on:
+      nossopainel-mysql:
+        condition: service_healthy
+
+    networks:
+      - public-network     # Acesso do Nginx
+      - database-network   # Acesso ao MySQL
+
+    volumes:
+      - ./nossopainel-django/.env:/home/django/app/.env
+      - ./nossopainel-django/database:/home/django/database
+      - ./nossopainel-django/mediafiles:/home/django/app/media
+      - ./nossopainel-django/staticfiles:/home/django/app/staticfiles
+      - ./nossopainel-django/telegram_bot.session:/home/django/app/telegram_bot.session
+
+    environment:
+      - DEBUG=False
+      - DJANGO_ENV=production
+      - TZ=America/Recife
+      # Configuração MySQL
+      - DB_ENGINE=mysql
+      - DB_HOST=nossopainel-mysql
+      - DB_PORT=3306
+      - DB_NAME=nossopaineldb
+      - DB_USER=${MYSQL_USER:-nossopaineluser}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    tty: true
+    restart: always
+
+  # ==========================================
+  # CERTBOT - Let's Encrypt SSL
+  # ==========================================
+  nossopainel-certbot:
+    image: certbot/certbot
+    container_name: nossopainel-certbot
+    volumes:
+      - ./nossopainel-certbot/www:/var/www/certbot
+      - ./nossopainel-certbot/conf:/etc/letsencrypt
+    entrypoint: >
+      sh -c "certbot certonly --webroot
+      --webroot-path=/var/www/certbot
+      --email jreiisgalvao@gmail.com
+      --agree-tos
+      --no-eff-email
+      -d nossopainel.com.br
+      -d www.nossopainel.com.br"
+    networks:
+      - public-network
+
+# ============================================
+# REDES - Segregação de acesso
+# ============================================
+networks:
+
+  # Rede pública (Nginx, Django, Certbot)
+  public-network:
+    driver: bridge
+
+  # Rede de banco de dados (INTERNA - MySQL + Django apenas)
+  database-network:
+    driver: bridge
+    internal: true

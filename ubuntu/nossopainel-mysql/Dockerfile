@@ -1,4 +1,4 @@
-FROM mysql:5.7
+FROM ubuntu:20.04
 
 # Define variáveis de ambiente
 ENV MYSQL_DATABASE=nossopaineldb

@@ -2,10 +2,13 @@ FROM ubuntu:20.04
 
 # Define variáveis de ambiente
 ENV MYSQL_DATABASE=nossopaineldb
+ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=America/Recife
 
 # Instala timezone data e cron para backups automáticos
-RUN apt-get update
+RUN apt-get update && apt-get install -y \
+    python3-pip python3-dev libpq-dev wget git tzdata supervisor && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copia configurações customizadas do MySQL
 COPY my.cnf /etc/mysql/conf.d/custom.cnf

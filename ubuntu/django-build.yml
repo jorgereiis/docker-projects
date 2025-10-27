@@ -55,7 +55,7 @@ services:
 
     networks:
       - public-network     # Acesso do Nginx
-      - database-network   # Acesso ao MySQL
+    #  - database-network   # Acesso ao MySQL
 
     volumes:
       - ./nossopainel-django/.env:/home/django/app/.env

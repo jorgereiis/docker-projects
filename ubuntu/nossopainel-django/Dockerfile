@@ -8,7 +8,7 @@ ENV TZ=America/Recife
 
 # Instala as dependências
 RUN apt-get update && apt-get install -y \
-    python3-pip python3-dev libpq-dev wget git tzdata supervisor && \
+    python3-pip python3-dev libpq-dev wget git tzdata supervisor build-essential pkg-config && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/django

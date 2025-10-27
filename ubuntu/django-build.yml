@@ -61,6 +61,7 @@ services:
       - ./nossopainel-django/.env:/home/django/app/.env
       - ./nossopainel-django/database:/home/django/database
       - ./nossopainel-django/mediafiles:/home/django/app/media
+      - ./nossopainel-django/db.sqlite3:/home/django/app/db.sqlite3
       - ./nossopainel-django/staticfiles:/home/django/app/staticfiles
       - ./nossopainel-django/telegram_bot.session:/home/django/app/telegram_bot.session
 
@@ -117,6 +118,6 @@ networks:
 
   # Rede de banco de dados (INTERNA - MySQL + Django apenas)
   # Criada pelo mysql-build.yml, usada aqui como external
-  database-network:
-    external: true
-    name: ubuntu_database-network
+  #database-network:
+  #  external: true
+  #  name: ubuntu_database-network

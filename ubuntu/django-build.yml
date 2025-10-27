@@ -53,11 +53,6 @@ services:
     container_name: nossopainel-django
     hostname: nossopainel-django
 
-    # Depende do MySQL estar pronto
-    depends_on:
-      nossopainel-mysql:
-        condition: service_healthy
-
     networks:
       - public-network     # Acesso do Nginx
       - database-network   # Acesso ao MySQL
@@ -121,6 +116,7 @@ networks:
     driver: bridge
 
   # Rede de banco de dados (INTERNA - MySQL + Django apenas)
+  # Criada pelo mysql-build.yml, usada aqui como external
   database-network:
-    driver: bridge
-    internal: true
+    external: true
+    name: ubuntu_database-network

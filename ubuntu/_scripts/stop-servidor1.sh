@@ -1,4 +1,5 @@
 #!/bin/bash
+
 ###############################################################################
 # Script de Parada - SERVIDOR 1
 # Para Django + MySQL + Nginx + Certbot

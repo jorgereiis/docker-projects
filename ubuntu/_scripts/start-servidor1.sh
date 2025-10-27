@@ -1,4 +1,5 @@
 #!/bin/bash
+
 ###############################################################################
 # Script de Inicialização - SERVIDOR 1
 # Django + MySQL + Nginx + Certbot

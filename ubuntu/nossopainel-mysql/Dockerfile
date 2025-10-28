@@ -15,7 +15,9 @@ ENV MYSQL_DATABASE=nossopaineldb \
 
 # Instala pacotes extras necessários
 # MySQL 8.0 e bash já estão incluídos na imagem base
-RUN apt-get update && apt-get install -y \
+# Nota: Removemos o repositório MySQL (chave GPG expirada) pois só precisamos dos repos Debian
+RUN rm -f /etc/apt/sources.list.d/mysql.list && \
+    apt-get update && apt-get install -y \
     cron \
     nano \
     dos2unix \

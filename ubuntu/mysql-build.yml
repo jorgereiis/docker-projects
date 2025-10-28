@@ -16,7 +16,8 @@ services:
     # VARIÁVEIS DE AMBIENTE (use .env file)
     # ========================================
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      # Root sem senha (seguro em rede isolada internal:true)
+      - MYSQL_ALLOW_EMPTY_PASSWORD=yes
       - MYSQL_DATABASE=nossopaineldb
       - MYSQL_USER=${MYSQL_USER:-nossopaineluser}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}

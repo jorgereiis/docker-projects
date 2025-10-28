@@ -57,8 +57,9 @@ RUN chmod +x /usr/local/bin/docker-entrypoint-wrapper.sh && \
 EXPOSE 3306
 
 # Healthcheck para verificar se MySQL está respondendo
+# Root sem senha (MYSQL_ALLOW_EMPTY_PASSWORD=yes)
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=30s \
-    CMD mysqladmin ping -h localhost -u root -p${MYSQL_ROOT_PASSWORD} || exit 1
+    CMD mysqladmin ping -h localhost -u root || exit 1
 
 # ==============================================================================
 # ENTRYPOINT E CMD

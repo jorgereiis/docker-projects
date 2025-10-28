@@ -14,11 +14,6 @@ BACKUP_DIR="/backups"
 BACKUP_FILE="${BACKUP_DIR}/nossopaineldb_${TIMESTAMP}.sql.gz"
 DB_NAME="${MYSQL_DATABASE:-nossopaineldb}"
 
-# Carrega variáveis de ambiente do processo init (PID 1) se não estiverem disponíveis
-if [ -z "$MYSQL_ROOT_PASSWORD" ] && [ -f /proc/1/environ ]; then
-    export $(cat /proc/1/environ | tr '\0' '\n' | grep MYSQL_ROOT_PASSWORD)
-fi
-
 # Garante que diretório de backup existe
 mkdir -p "$BACKUP_DIR"
 
@@ -26,27 +21,11 @@ echo "======================================================================"
 echo "[$(date)] Iniciando backup automático do MySQL"
 echo "======================================================================"
 
-# Verifica se variável de senha existe
-if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
-    echo "❌ ERRO: MYSQL_ROOT_PASSWORD não definida!"
-    exit 1
-fi
-
-# Cria backup
+# Cria backup (root sem senha - MYSQL_ALLOW_EMPTY_PASSWORD=yes)
 echo "📦 Criando dump do banco '$DB_NAME'..."
-
-# Usa MYSQL_ROOT_PASSWORD via variável de ambiente
-# Em cron, as variáveis podem não estar disponíveis, então tenta ler do ambiente do processo MySQL
-if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
-    # Tenta conectar sem senha (para compatibilidade)
-    PASSWORD_OPT=""
-else
-    PASSWORD_OPT="-p${MYSQL_ROOT_PASSWORD}"
-fi
 
 if mysqldump \
     -u root \
-    ${PASSWORD_OPT} \
     --single-transaction \
     --routines \
     --triggers \

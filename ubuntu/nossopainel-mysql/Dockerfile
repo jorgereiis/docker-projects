@@ -45,12 +45,8 @@ RUN chmod +x /usr/local/bin/backup-cron.sh && \
     dos2unix /usr/local/bin/backup-cron.sh 2>/dev/null || true
 
 # Configura cron para backups automáticos (diário às 2h da manhã)
-RUN echo "0 2 * * * /usr/local/bin/backup-cron.sh" | crontab -
-
-# Copia wrapper de entrypoint para iniciar cron + MySQL
-COPY docker-entrypoint-wrapper.sh /usr/local/bin/docker-entrypoint-wrapper.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint-wrapper.sh && \
-    dos2unix /usr/local/bin/docker-entrypoint-wrapper.sh 2>/dev/null || true
+# NOTA: Cron será iniciado manualmente ou via cronjob externo no host
+# RUN echo "0 2 * * * /usr/local/bin/backup-cron.sh" | crontab -
 
 # Expõe porta 3306 (apenas para rede interna Docker)
 # Nota: A imagem mysql:5.7 já expõe a porta 3306, mas mantemos explícito
@@ -64,16 +60,13 @@ HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=30s \
 # ==============================================================================
 # ENTRYPOINT E CMD
 # ==============================================================================
-# Usamos um wrapper que:
-# 1. Inicia cron (para backups automáticos)
-# 2. Chama o entrypoint original do mysql:8.0
-#
-# O entrypoint original do MySQL faz:
+# Usa o entrypoint padrão do mysql:8.0-debian que:
 # 1. Inicializa o banco na primeira execução
 # 2. Cria usuário e banco configurados via ENV
 # 3. Executa scripts em /docker-entrypoint-initdb.d/
 # 4. Inicia MySQL em foreground
+#
+# O entrypoint e CMD padrão da imagem mysql:8.0-debian já estão configurados:
+# ENTRYPOINT ["docker-entrypoint.sh"]
+# CMD ["mysqld"]
 # ==============================================================================
-
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint-wrapper.sh"]
-CMD ["mysqld"]

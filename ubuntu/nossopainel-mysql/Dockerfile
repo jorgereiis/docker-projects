@@ -1,21 +1,20 @@
 # ==============================================================================
-# MySQL 5.7 Container - Nosso Painel Gestão
+# MySQL 8.0 Container - Nosso Painel Gestão
 # ==============================================================================
-# Base: MySQL 5.7.44 (última versão estável do MySQL 5.7)
-# Nota: mysql:5.7-debian usava Debian 10 Buster (EOL jun/2024), repositórios desativados
-# Nota: MySQL 5.7 atingiu EOL em out/2023, migração para 8.0 recomendada no futuro
+# Base: MySQL 8.0 com Debian (suporte até 2026)
+# Migração de MySQL 5.7 → 8.0 devido a EOL e problemas com repositórios
 # Referência: https://hub.docker.com/_/mysql
 # ==============================================================================
 
-FROM mysql:5.7.44
+FROM mysql:8.0-debian
 
 # Define variáveis de ambiente
-# Nota: A imagem mysql:5.7 já reconhece estas variáveis automaticamente
+# Nota: A imagem mysql:8.0 reconhece estas variáveis automaticamente
 ENV MYSQL_DATABASE=nossopaineldb \
     TZ=America/Recife
 
 # Instala pacotes extras necessários
-# MySQL 5.7 e bash já estão incluídos na imagem base
+# MySQL 8.0 e bash já estão incluídos na imagem base
 RUN apt-get update && apt-get install -y \
     cron \
     nano \
@@ -27,12 +26,12 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /backups && chmod 755 /backups
 
 # Copia configurações customizadas do MySQL
-# A imagem mysql:5.7 carrega automaticamente arquivos de /etc/mysql/conf.d/
+# A imagem mysql:8.0 carrega automaticamente arquivos de /etc/mysql/conf.d/
 COPY my.cnf /etc/mysql/conf.d/custom.cnf
 RUN chmod 644 /etc/mysql/conf.d/custom.cnf
 
 # Copia script de inicialização (importa dump na primeira execução)
-# A imagem mysql:5.7 executa automaticamente scripts em /docker-entrypoint-initdb.d/
+# A imagem mysql:8.0 executa automaticamente scripts em /docker-entrypoint-initdb.d/
 # Ordem: *.sh (executados), depois *.sql (importados), depois *.sql.gz (descompactados e importados)
 COPY init-db.sh /docker-entrypoint-initdb.d/init-db.sh
 RUN chmod +x /docker-entrypoint-initdb.d/init-db.sh && \
@@ -64,7 +63,7 @@ HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=30s \
 # ==============================================================================
 # Usamos um wrapper que:
 # 1. Inicia cron (para backups automáticos)
-# 2. Chama o entrypoint original do mysql:5.7
+# 2. Chama o entrypoint original do mysql:8.0
 #
 # O entrypoint original do MySQL faz:
 # 1. Inicializa o banco na primeira execução

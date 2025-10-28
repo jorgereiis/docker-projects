@@ -8,7 +8,7 @@ ENV TZ=America/Recife
 
 # Instala as dependências
 RUN apt-get update && apt-get install -y \
-    python3-pip python3-dev libpq-dev wget git tzdata supervisor build-essential pkg-config && \
+    python3-pip python3-dev libpq-dev wget git tzdata supervisor build-essential pkg-config curl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/django
@@ -24,10 +24,14 @@ RUN mkdir -p /var/log/supervisor
 
 # Define o diretório de trabalho e instala os requisitos
 WORKDIR /home/django/app
-RUN pip3 install --default-timeout=120 --no-cache-dir -r requirements.txt
+RUN pip3 install --default-timeout=150 --no-cache-dir -r requirements.txt
 
 # Expõe a porta para o servidor
 EXPOSE 8001
+
+# Healthcheck para verificar se o Django está respondendo
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \
+    CMD curl -f http://localhost:8001/ || exit 1
 
 # Configuração do supervisord
 RUN echo '[supervisord]' > /etc/supervisor/conf.d/django.conf && \

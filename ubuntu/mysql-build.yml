@@ -43,16 +43,6 @@ services:
       - ./nossopainel-mysql/logs:/var/log/mysql
 
     # ========================================
-    # HEALTHCHECK
-    # ========================================
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-    # ========================================
     # RESTART POLICY
     # ========================================
     restart: always
@@ -78,5 +68,6 @@ networks:
 
   # Rede de banco de dados (INTERNA - MySQL + Django apenas)
   database-network:
+    name: ubuntu_database-network
     driver: bridge
     internal: true

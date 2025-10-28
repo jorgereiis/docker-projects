@@ -33,13 +33,6 @@ services:
       - ./nossopainel-django/mediafiles:/usr/share/nginx/html/media
       - ./nossopainel-django/staticfiles:/usr/share/nginx/html/staticfiles
 
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
     tty: true
     restart: always
 
@@ -53,9 +46,14 @@ services:
     container_name: nossopainel-django
     hostname: nossopainel-django
 
+    # Aguarda MySQL estar pronto antes de iniciar
+    depends_on:
+      nossopainel-mysql:
+        condition: service_healthy
+
     networks:
       - public-network     # Acesso do Nginx
-    #  - database-network   # Acesso ao MySQL
+      - database-network   # Acesso ao MySQL
 
     volumes:
       - ./nossopainel-django/.env:/home/django/app/.env
@@ -70,19 +68,11 @@ services:
       - DJANGO_ENV=production
       - TZ=America/Recife
       # Configuração MySQL
-      - DB_ENGINE=mysql
       - DB_HOST=nossopainel-mysql
       - DB_PORT=3306
       - DB_NAME=nossopaineldb
       - DB_USER=${MYSQL_USER:-nossopaineluser}
       - DB_PASSWORD=${MYSQL_PASSWORD}
-
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
     tty: true
     restart: always
@@ -118,6 +108,6 @@ networks:
 
   # Rede de banco de dados (INTERNA - MySQL + Django apenas)
   # Criada pelo mysql-build.yml, usada aqui como external
-  #database-network:
-  #  external: true
-  #  name: ubuntu_database-network
+  database-network:
+    external: true
+    name: ubuntu_database-network

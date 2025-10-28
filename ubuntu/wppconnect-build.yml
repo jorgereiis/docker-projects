@@ -29,13 +29,6 @@ services:
       - NODE_ENV=production
       - TZ=America/Recife
 
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:21465/api/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 90s
-
     tty: true
     restart: always
 

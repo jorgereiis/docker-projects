@@ -1,12 +1,13 @@
 # ==============================================================================
 # MySQL 5.7 Container - Nosso Painel Gestão
 # ==============================================================================
-# Base: Imagem oficial MySQL 5.7 com Debian 11 (Bullseye)
-# Nota: Usa tag "-debian" pois a tag padrão mudou para Oracle Linux
+# Base: MySQL 5.7.44 (última versão estável do MySQL 5.7)
+# Nota: mysql:5.7-debian usava Debian 10 Buster (EOL jun/2024), repositórios desativados
+# Nota: MySQL 5.7 atingiu EOL em out/2023, migração para 8.0 recomendada no futuro
 # Referência: https://hub.docker.com/_/mysql
 # ==============================================================================
 
-FROM mysql:5.7-debian
+FROM mysql:5.7.44
 
 # Define variáveis de ambiente
 # Nota: A imagem mysql:5.7 já reconhece estas variáveis automaticamente

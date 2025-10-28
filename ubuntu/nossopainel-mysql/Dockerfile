@@ -1,11 +1,12 @@
 # ==============================================================================
 # MySQL 5.7 Container - Nosso Painel Gestão
 # ==============================================================================
-# Base: Imagem oficial MySQL 5.7 (Debian com bash disponível)
+# Base: Imagem oficial MySQL 5.7 com Debian 11 (Bullseye)
+# Nota: Usa tag "-debian" pois a tag padrão mudou para Oracle Linux
 # Referência: https://hub.docker.com/_/mysql
 # ==============================================================================
 
-FROM mysql:5.7
+FROM mysql:5.7-debian
 
 # Define variáveis de ambiente
 # Nota: A imagem mysql:5.7 já reconhece estas variáveis automaticamente

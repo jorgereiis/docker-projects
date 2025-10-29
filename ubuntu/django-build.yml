@@ -46,11 +46,6 @@ services:
     container_name: nossopainel-django
     hostname: nossopainel-django
 
-    # Aguarda MySQL estar pronto antes de iniciar
-    depends_on:
-      nossopainel-mysql:
-        condition: service_healthy
-
     networks:
       - public-network     # Acesso do Nginx
       - database-network   # Acesso ao MySQL

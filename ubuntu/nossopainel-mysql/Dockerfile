@@ -32,12 +32,16 @@ RUN mkdir -p /backups && chmod 755 /backups
 COPY my.cnf /etc/mysql/conf.d/custom.cnf
 RUN chmod 644 /etc/mysql/conf.d/custom.cnf
 
-# Copia script de inicialização (importa dump na primeira execução)
+# Copia scripts de inicialização
 # A imagem mysql:8.0 executa automaticamente scripts em /docker-entrypoint-initdb.d/
-# Ordem: *.sh (executados), depois *.sql (importados), depois *.sql.gz (descompactados e importados)
+# Ordem alfabética: init-db.sh → nossopaineldb.sql → zzz-post-validation.sh
 COPY init-db.sh /docker-entrypoint-initdb.d/init-db.sh
 RUN chmod +x /docker-entrypoint-initdb.d/init-db.sh && \
     dos2unix /docker-entrypoint-initdb.d/init-db.sh 2>/dev/null || true
+
+COPY zzz-post-validation.sh /docker-entrypoint-initdb.d/zzz-post-validation.sh
+RUN chmod +x /docker-entrypoint-initdb.d/zzz-post-validation.sh && \
+    dos2unix /docker-entrypoint-initdb.d/zzz-post-validation.sh 2>/dev/null || true
 
 # Copia script de backup
 COPY backup-cron.sh /usr/local/bin/backup-cron.sh

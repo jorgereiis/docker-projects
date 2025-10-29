@@ -31,14 +31,39 @@ if command -v cron >/dev/null 2>&1; then
         echo "  ⚠️  AVISO: Nenhum cron job configurado"
     fi
 
-    # Inicia cron
-    cron
+    # Inicia cron (tenta múltiplos métodos)
+    CRON_STARTED=false
+
+    # Método 1: /etc/init.d/cron start
+    if [ -f /etc/init.d/cron ]; then
+        if /etc/init.d/cron start >/dev/null 2>&1; then
+            CRON_STARTED=true
+        fi
+    fi
+
+    # Método 2: service cron start (se método 1 falhou)
+    if [ "$CRON_STARTED" = false ] && command -v service >/dev/null 2>&1; then
+        if service cron start >/dev/null 2>&1; then
+            CRON_STARTED=true
+        fi
+    fi
+
+    # Método 3: cron direto (se métodos anteriores falharam)
+    if [ "$CRON_STARTED" = false ]; then
+        cron >/dev/null 2>&1 || true
+    fi
+
+    # Aguarda 1 segundo para cron se estabelecer
+    sleep 1
 
     # Verifica se iniciou
     if pgrep cron >/dev/null 2>&1; then
-        echo "✓ Cron daemon iniciado com sucesso"
+        CRON_PID=$(pgrep cron)
+        echo "✓ Cron daemon iniciado com sucesso (PID: $CRON_PID)"
     else
-        echo "⚠️  AVISO: Falha ao iniciar cron daemon"
+        echo "⚠️  AVISO: Cron daemon não está rodando"
+        echo "  Backups e monitoramento automáticos NÃO funcionarão"
+        echo "  Execute manualmente: docker exec nossopainel-mysql cron"
     fi
 else
     echo "⚠️  AVISO: Comando 'cron' não encontrado"

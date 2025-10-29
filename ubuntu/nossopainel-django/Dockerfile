@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     pkg-config \
     curl \
+    nano \
     default-libmysqlclient-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -38,10 +39,6 @@ RUN pip3 install --default-timeout=150 --no-cache-dir -r requirements.txt
 
 # Expõe a porta para o servidor
 EXPOSE 8001
-
-# Healthcheck para verificar se o Django está respondendo
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \
-    CMD curl -f http://localhost:8001/ || exit 1
 
 # Configuração do supervisord
 RUN echo '[supervisord]' > /etc/supervisor/conf.d/django.conf && \

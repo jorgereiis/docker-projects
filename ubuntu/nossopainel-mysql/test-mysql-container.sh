@@ -310,7 +310,7 @@ if docker ps | grep -q nossopainel-django; then
     echo -e "  ${GREEN}ℹ${NC} Container Django detectado"
 
     # Testa conectividade com Django
-    DJANGO_URL=$(docker exec $CONTAINER_NAME printenv DJANGO_INTERNAL_URL 2>/dev/null || echo "http://nossopainel-django:8000")
+    DJANGO_URL=$(docker exec $CONTAINER_NAME printenv DJANGO_INTERNAL_URL 2>/dev/null || echo "http://nossopainel-django:8001")
     echo -e "  ${YELLOW}Testando conexão com Django: $DJANGO_URL${NC}"
 
     if docker exec $CONTAINER_NAME curl -s --max-time 5 "$DJANGO_URL" >/dev/null 2>&1; then

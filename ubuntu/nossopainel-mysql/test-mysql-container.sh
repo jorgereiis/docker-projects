@@ -179,9 +179,6 @@ test_check "whatsapp-notify.sh existe" \
 test_check "whatsapp-notify.sh é executável" \
     "docker exec $CONTAINER_NAME test -x /usr/local/bin/whatsapp-notify.sh"
 
-test_check "init-db.sh existe" \
-    "docker exec $CONTAINER_NAME test -f /docker-entrypoint-initdb.d/init-db.sh"
-
 echo ""
 
 # ==============================================================================

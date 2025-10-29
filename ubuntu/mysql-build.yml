@@ -39,7 +39,7 @@ services:
       - ./nossopainel-mysql/data:/var/lib/mysql
       - ./nossopainel-mysql/nossopaineldb.sql:/docker-entrypoint-initdb.d/nossopaineldb.sql:ro
       
-      # Backups automáticos (cron diário às 2h) + monitoramento (6/6h)
+      # Backups (scripts disponíveis para configuração manual)
       - ./nossopainel-mysql/backups:/backups
 
       # Logs do MySQL

@@ -22,6 +22,8 @@ services:
       - MYSQL_USER=${MYSQL_USER:-nossopaineluser}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
       - TZ=America/Recife
+      # URL do Django para notificações WhatsApp (rede interna)
+      - DJANGO_INTERNAL_URL=${DJANGO_INTERNAL_URL:-http://nossopainel-django:8000}
 
     # ========================================
     # REDES (APENAS INTERNA - NÃO EXPOR!)
@@ -37,7 +39,7 @@ services:
       - ./nossopainel-mysql/data:/var/lib/mysql
       - ./nossopainel-mysql/nossopaineldb.sql:/docker-entrypoint-initdb.d/nossopaineldb.sql:ro
       
-      # Backups automáticos (cron diário às 3h)
+      # Backups automáticos (cron diário às 2h) + monitoramento (6/6h)
       - ./nossopainel-mysql/backups:/backups
 
       # Logs do MySQL

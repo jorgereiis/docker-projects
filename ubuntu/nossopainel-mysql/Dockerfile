@@ -44,12 +44,29 @@ COPY backup-cron.sh /usr/local/bin/backup-cron.sh
 RUN chmod +x /usr/local/bin/backup-cron.sh && \
     dos2unix /usr/local/bin/backup-cron.sh 2>/dev/null || true
 
-# Configura cron para backups automáticos (diário às 2h da manhã)
-# NOTA: Cron será iniciado manualmente ou via cronjob externo no host
-# RUN echo "0 2 * * * /usr/local/bin/backup-cron.sh" | crontab -
+# Copia script de monitoramento
+COPY monitor-mysql.sh /usr/local/bin/monitor-mysql.sh
+RUN chmod +x /usr/local/bin/monitor-mysql.sh && \
+    dos2unix /usr/local/bin/monitor-mysql.sh 2>/dev/null || true
+
+# Copia função helper de notificações WhatsApp
+COPY whatsapp-notify.sh /usr/local/bin/whatsapp-notify.sh
+RUN chmod +x /usr/local/bin/whatsapp-notify.sh && \
+    dos2unix /usr/local/bin/whatsapp-notify.sh 2>/dev/null || true
+
+# Configura cron jobs automáticos
+# - Backup: diário às 2h da manhã
+# - Monitor: a cada 6 horas (0h, 6h, 12h, 18h)
+RUN echo "0 2 * * * /usr/local/bin/backup-cron.sh >> /var/log/mysql/backup-cron.log 2>&1" | crontab - && \
+    echo "0 */6 * * * /usr/local/bin/monitor-mysql.sh >> /var/log/mysql/monitor-cron.log 2>&1" | crontab -
+
+# Copia entrypoint wrapper (inicia cron + MySQL)
+COPY entrypoint-init.sh /usr/local/bin/entrypoint-init.sh
+RUN chmod +x /usr/local/bin/entrypoint-init.sh && \
+    dos2unix /usr/local/bin/entrypoint-init.sh 2>/dev/null || true
 
 # Expõe porta 3306 (apenas para rede interna Docker)
-# Nota: A imagem mysql:5.7 já expõe a porta 3306, mas mantemos explícito
+# Nota: A imagem mysql:8.0 já expõe a porta 3306, mas mantemos explícito
 EXPOSE 3306
 
 # Healthcheck para verificar se MySQL está respondendo
@@ -60,13 +77,13 @@ HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=30s \
 # ==============================================================================
 # ENTRYPOINT E CMD
 # ==============================================================================
-# Usa o entrypoint padrão do mysql:8.0-debian que:
-# 1. Inicializa o banco na primeira execução
-# 2. Cria usuário e banco configurados via ENV
-# 3. Executa scripts em /docker-entrypoint-initdb.d/
-# 4. Inicia MySQL em foreground
-#
-# O entrypoint e CMD padrão da imagem mysql:8.0-debian já estão configurados:
-# ENTRYPOINT ["docker-entrypoint.sh"]
-# CMD ["mysqld"]
+# Usa entrypoint customizado que:
+# 1. Inicia cron daemon (para backups e monitoramento automáticos)
+# 2. Chama o entrypoint padrão do mysql:8.0-debian que:
+#    - Inicializa o banco na primeira execução
+#    - Cria usuário e banco configurados via ENV
+#    - Executa scripts em /docker-entrypoint-initdb.d/
+#    - Inicia MySQL em foreground
 # ==============================================================================
+ENTRYPOINT ["/usr/local/bin/entrypoint-init.sh"]
+CMD ["mysqld"]

@@ -119,12 +119,23 @@ test_check "Usuário app existe" \
     "docker exec $CONTAINER_NAME mysql -u root -e \"SELECT User FROM mysql.user WHERE User='nossopaineluser'\" --silent | grep -q nossopaineluser"
 
 # Teste de conexão com usuário app (requer senha do .env)
+MYSQL_PASSWORD=""
+
+# Tenta ler do .env no diretório atual
 if [ -f .env ]; then
     MYSQL_PASSWORD=$(grep '^MYSQL_PASSWORD=' .env | cut -d'=' -f2)
-    if [ -n "$MYSQL_PASSWORD" ]; then
-        test_check "Usuário app consegue conectar" \
-            "docker exec $CONTAINER_NAME mysql -u nossopaineluser -p'$MYSQL_PASSWORD' -e 'SELECT 1' --silent"
-    fi
+fi
+
+# Se não encontrou, tenta do .env.example
+if [ -z "$MYSQL_PASSWORD" ] && [ -f .env.example ]; then
+    MYSQL_PASSWORD=$(grep '^MYSQL_PASSWORD=' .env.example | cut -d'=' -f2 | grep -v 'SuaSenha')
+fi
+
+if [ -n "$MYSQL_PASSWORD" ]; then
+    test_check "Usuário app consegue conectar" \
+        "docker exec $CONTAINER_NAME mysql -u nossopaineluser -p'$MYSQL_PASSWORD' -e 'SELECT 1' --silent 2>&1 | grep -q '^1\$'"
+else
+    echo -e "  ${YELLOW}⚠${NC}  MYSQL_PASSWORD não encontrada - pulando teste"
 fi
 
 echo ""
@@ -299,7 +310,7 @@ if docker ps | grep -q nossopainel-django; then
     echo -e "  ${GREEN}ℹ${NC} Container Django detectado"
 
     # Testa conectividade com Django
-    DJANGO_URL=$(docker exec $CONTAINER_NAME printenv DJANGO_INTERNAL_URL 2>/dev/null || echo "http://nossopainel-django:8000")
+    DJANGO_URL=$(docker exec $CONTAINER_NAME printenv DJANGO_INTERNAL_URL 2>/dev/null || echo "http://nossopainel-django:8001")
     echo -e "  ${YELLOW}Testando conexão com Django: $DJANGO_URL${NC}"
 
     if docker exec $CONTAINER_NAME curl -s --max-time 5 "$DJANGO_URL" >/dev/null 2>&1; then

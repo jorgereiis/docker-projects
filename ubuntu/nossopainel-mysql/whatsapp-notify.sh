@@ -13,7 +13,7 @@
 ###############################################################################
 
 # URL do endpoint Django (mesma rede Docker interna)
-DJANGO_URL="${DJANGO_INTERNAL_URL:-http://nossopainel-django:8000}"
+DJANGO_URL="${DJANGO_INTERNAL_URL:-http://nossopainel-django:8001}"
 WHATSAPP_ENDPOINT="${DJANGO_URL}/api/internal/send-whatsapp/"
 
 # Timeout para requisições HTTP

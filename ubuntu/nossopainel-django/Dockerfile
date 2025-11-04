@@ -70,7 +70,7 @@ RUN pip3 install --default-timeout=150 --no-cache-dir -r requirements.txt
 RUN pip3 install --no-cache-dir playwright==1.48.0 greenlet==3.1.1
 
 # Verifica instalação do Playwright (debug)
-RUN python3 -c "import playwright; print('Playwright instalado com sucesso, versão:', playwright.__version__)"
+#RUN python3 -c "import playwright; print('Playwright instalado com sucesso, versão:', playwright.__version__)"
 
 # Instala o navegador Chromium e dependências do Playwright
 RUN python3 -m playwright install chromium

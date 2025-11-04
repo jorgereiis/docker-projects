@@ -67,8 +67,8 @@ WORKDIR /home/django/app
 RUN pip3 install --default-timeout=150 --no-cache-dir -r requirements.txt
 
 # Instala o navegador Chromium e dependências do Playwright
-RUN playwright install chromium
-RUN playwright install-deps
+RUN python3 -m playwright install chromium
+RUN python3 -m playwright install-deps
 
 # Expõe a porta para o servidor
 EXPOSE 8001

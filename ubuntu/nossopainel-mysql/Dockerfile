@@ -18,6 +18,7 @@ ENV MYSQL_DATABASE=nossopaineldb \
 # Remove repositório MySQL (chave GPG expirada)
 RUN rm -f /etc/apt/sources.list.d/mysql.list && \
     apt-get update && apt-get install -y \
+    iputils-ping \
     cron \
     nano \
     dos2unix \

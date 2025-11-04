@@ -43,11 +43,6 @@ services:
     hostname: wppconnect-nginx
     entrypoint: nginx -g "daemon off;"
 
-    # Depende do WPPConnect estar rodando
-    depends_on:
-      wppconnect-server:
-        condition: service_healthy
-
     ports:
       - "80:80"
 

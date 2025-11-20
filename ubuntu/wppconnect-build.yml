@@ -32,33 +32,6 @@ services:
     tty: true
     restart: always
 
-  # ==========================================
-  # NGINX - Reverse Proxy para WPPConnect
-  # ==========================================
-  wppconnect-nginx:
-    build:
-      context: ./wppconnect-nginx
-      dockerfile: Dockerfile
-    container_name: wppconnect-nginx
-    hostname: wppconnect-nginx
-    entrypoint: nginx -g "daemon off;"
-
-    ports:
-      - "80:80"
-
-    networks:
-      - public-network
-
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-    tty: true
-    restart: always
-
 # ============================================
 # REDES
 # ============================================

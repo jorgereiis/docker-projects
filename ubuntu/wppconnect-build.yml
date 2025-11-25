@@ -24,6 +24,7 @@ services:
       - ./wppconnect-server/backups:/home/node/app/backups
       - ./wppconnect-server/tokens:/home/node/app/tokens
       - ./wppconnect-server/sessions:/home/node/app/sessions
+      - ./wppconnect-server/userDataDir:/home/node/app/userDataDir
 
     environment:
       - NODE_ENV=production

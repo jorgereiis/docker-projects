@@ -18,3 +18,4 @@ db.sqlite3-journal
 media
 *.sql
 *.md
+nossopainel-django/mediafiles

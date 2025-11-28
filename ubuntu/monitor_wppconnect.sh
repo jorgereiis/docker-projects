@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Monitor WPPCONNECT - Verifica sessões e faz restart/rebuild se necessário
-# Localização no servidor: /Docker/monitor_wppconnect.sh
+# Localização no servidor: /Docker/ubuntu/monitor_wppconnect.sh
 #
 # Lógica de verificação:
 # 1. Container não UP → docker restart (solução rápida)
@@ -9,9 +9,18 @@
 # 3. Divergência status-session vs check-connection → rebuild completo
 #    (detecta problema de detached frame no Puppeteer)
 #
+# Obtenção de tokens:
+# - Os tokens das sessões são obtidos do banco SQLite do Django
+# - Tabela: cadastros_sessaowpp (campos: usuario, token, is_active)
+# - Configure DB_PATH abaixo com o caminho correto do banco
+#
+# Pré-requisitos:
+# - sqlite3 instalado (apt-get install sqlite3)
+# - Acesso de leitura ao banco de dados Django
+#
 # Uso:
-#   chmod +x /Docker/monitor_wppconnect.sh
-#   Adicionar ao crontab: */10 * * * * /Docker/monitor_wppconnect.sh
+#   chmod +x /Docker/ubuntu/monitor_wppconnect.sh
+#   Adicionar ao crontab: */10 * * * * /Docker/ubuntu/monitor_wppconnect.sh
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -19,6 +28,10 @@ LOGFILE="${SCRIPT_DIR}/logs/wppconnect_monitor.log"
 DIVERGENCE_FILE="/tmp/wppconnect_divergence_count"
 API_URL="http://api.nossopainel.com.br/api"
 DIVERGENCE_THRESHOLD=3  # Divergências consecutivas antes de rebuild
+
+# Caminho do banco de dados SQLite do Django (onde os tokens estão armazenados)
+# Ajuste conforme a localização no seu servidor
+DB_PATH="${SCRIPT_DIR}/nossopainel-django/database/db.sqlite3"
 
 # Criar diretório de logs se não existir
 mkdir -p "${SCRIPT_DIR}/logs"
@@ -75,16 +88,13 @@ rebuild_container() {
 
     # Detectar diretório do docker-compose automaticamente
     COMPOSE_DIR=""
-    if [ -f "${SCRIPT_DIR}/ubuntu/wppconnect-build.yml" ]; then
-        COMPOSE_DIR="${SCRIPT_DIR}/ubuntu"
-    elif [ -f "${SCRIPT_DIR}/wppconnect-build.yml" ]; then
+    if [ -f "${SCRIPT_DIR}/wppconnect-build.yml" ]; then
         COMPOSE_DIR="${SCRIPT_DIR}"
     elif [ -f "${SCRIPT_DIR}/../wppconnect-build.yml" ]; then
         COMPOSE_DIR="${SCRIPT_DIR}/.."
     else
         log "[REBUILD] ERRO: Não foi possível encontrar wppconnect-build.yml"
         log "[REBUILD] Locais verificados:"
-        log "[REBUILD]   - ${SCRIPT_DIR}/ubuntu/wppconnect-build.yml"
         log "[REBUILD]   - ${SCRIPT_DIR}/wppconnect-build.yml"
         log "[REBUILD]   - ${SCRIPT_DIR}/../wppconnect-build.yml"
         return 1
@@ -288,79 +298,73 @@ if [ "$API_STATUS" = "404" ]; then
     log "[ETAPA 2] Nota: 404 na rota raiz é normal - a API está UP, apenas não tem handler nesse path"
 fi
 
-# Etapa 3: Verificar sessões
+# Etapa 3: Verificar sessões (obtendo tokens do banco de dados Django)
 log "[ETAPA 3] Verificando sessões existentes..."
-
-# Detectar diretório de tokens automaticamente
-# Possíveis localizações:
-#   - ${SCRIPT_DIR}/ubuntu/wppconnect-server/tokens (se script está em /Docker/)
-#   - ${SCRIPT_DIR}/wppconnect-server/tokens (se script está em /Docker/ubuntu/)
-#   - ${SCRIPT_DIR}/../wppconnect-server/tokens (se script está em outro lugar)
-
-TOKENS_DIR=""
-if [ -d "${SCRIPT_DIR}/ubuntu/wppconnect-server/tokens" ]; then
-    TOKENS_DIR="${SCRIPT_DIR}/ubuntu/wppconnect-server/tokens"
-elif [ -d "${SCRIPT_DIR}/wppconnect-server/tokens" ]; then
-    TOKENS_DIR="${SCRIPT_DIR}/wppconnect-server/tokens"
-elif [ -d "${SCRIPT_DIR}/../wppconnect-server/tokens" ]; then
-    TOKENS_DIR="${SCRIPT_DIR}/../wppconnect-server/tokens"
-else
-    log "[ETAPA 3] ERRO: Não foi possível encontrar diretório de tokens"
-    log "[ETAPA 3] Locais verificados:"
-    log "[ETAPA 3]   - ${SCRIPT_DIR}/ubuntu/wppconnect-server/tokens"
-    log "[ETAPA 3]   - ${SCRIPT_DIR}/wppconnect-server/tokens"
-    log "[ETAPA 3]   - ${SCRIPT_DIR}/../wppconnect-server/tokens"
-fi
-
-log "[ETAPA 3] Diretório de tokens: $TOKENS_DIR"
+log "[ETAPA 3] Banco de dados: $DB_PATH"
 
 SESSION_DIVERGENCE=0
 SESSIONS_CHECKED=0
 SESSIONS_OK=0
 SESSIONS_DIVERGENT=0
 
-if [ -d "$TOKENS_DIR" ]; then
-    TOKEN_FILES=$(ls -1 "$TOKENS_DIR"/*.data.json 2>/dev/null | wc -l)
-    log "[ETAPA 3] Arquivos de token encontrados: $TOKEN_FILES"
-
-    if [ "$TOKEN_FILES" -eq 0 ]; then
-        log "[ETAPA 3] Nenhuma sessão ativa para verificar"
-    else
-        for TOKEN_FILE in "$TOKENS_DIR"/*.data.json; do
-            [ -e "$TOKEN_FILE" ] || continue  # Pular se não existir
-
-            # Extrair nome da sessão do arquivo
-            SESSION_NAME=$(basename "$TOKEN_FILE" .data.json)
-            log "[ETAPA 3] Processando arquivo: $(basename "$TOKEN_FILE")"
-
-            # Extrair token do arquivo
-            TOKEN=$(grep -o '"token":"[^"]*"' "$TOKEN_FILE" 2>/dev/null | cut -d'"' -f4)
-
-            if [ -z "$TOKEN" ]; then
-                log "[ETAPA 3] ALERTA: Token não encontrado no arquivo $TOKEN_FILE"
-                continue
-            fi
-
-            if [ -z "$SESSION_NAME" ]; then
-                log "[ETAPA 3] ALERTA: Nome da sessão não identificado"
-                continue
-            fi
-
-            log "[ETAPA 3] Sessão: $SESSION_NAME | Token: ${TOKEN:0:20}..."
-
-            SESSIONS_CHECKED=$((SESSIONS_CHECKED + 1))
-
-            if ! check_session "$SESSION_NAME" "$TOKEN"; then
-                SESSION_DIVERGENCE=1
-                SESSIONS_DIVERGENT=$((SESSIONS_DIVERGENT + 1))
-            else
-                SESSIONS_OK=$((SESSIONS_OK + 1))
-            fi
-        done
-    fi
+# Verificar se o banco de dados existe
+if [ ! -f "$DB_PATH" ]; then
+    log "[ETAPA 3] ERRO: Banco de dados não encontrado: $DB_PATH"
+    log "[ETAPA 3] Verifique o caminho DB_PATH no início do script"
+    log "[ETAPA 3] Possíveis localizações:"
+    log "[ETAPA 3]   - ${SCRIPT_DIR}/nossopainel-django/database/db.sqlite3"
+    log "[ETAPA 3]   - /root/Docker/ubuntu/nossopainel-django/database/db.sqlite3"
 else
-    log "[ETAPA 3] ALERTA: Diretório de tokens não encontrado: $TOKENS_DIR"
-    log "[ETAPA 3] Isso pode indicar que nenhuma sessão foi criada ainda"
+    # Verificar se sqlite3 está instalado
+    if ! command -v sqlite3 &> /dev/null; then
+        log "[ETAPA 3] ERRO: sqlite3 não está instalado"
+        log "[ETAPA 3] Instale com: apt-get install sqlite3"
+    else
+        # Consultar sessões ativas no banco Django
+        # Tabela: cadastros_sessaowpp | Campos: usuario, token, is_active
+        log "[ETAPA 3] Consultando sessões ativas no banco Django..."
+
+        QUERY="SELECT usuario, token FROM cadastros_sessaowpp WHERE is_active = 1;"
+        SESSIONS_DATA=$(sqlite3 -separator '|' "$DB_PATH" "$QUERY" 2>/dev/null)
+
+        if [ -z "$SESSIONS_DATA" ]; then
+            log "[ETAPA 3] Nenhuma sessão ativa encontrada no banco"
+        else
+            # Contar sessões
+            TOTAL_SESSIONS=$(echo "$SESSIONS_DATA" | wc -l)
+            log "[ETAPA 3] Sessões ativas encontradas: $TOTAL_SESSIONS"
+
+            # Iterar sobre cada sessão (formato: usuario|token)
+            echo "$SESSIONS_DATA" | while IFS='|' read -r SESSION_NAME TOKEN; do
+                if [ -z "$SESSION_NAME" ] || [ -z "$TOKEN" ]; then
+                    log "[ETAPA 3] ALERTA: Linha inválida no resultado da consulta"
+                    continue
+                fi
+
+                log "[ETAPA 3] Sessão: $SESSION_NAME | Token: ${TOKEN:0:20}..."
+
+                SESSIONS_CHECKED=$((SESSIONS_CHECKED + 1))
+
+                if ! check_session "$SESSION_NAME" "$TOKEN"; then
+                    SESSION_DIVERGENCE=1
+                    SESSIONS_DIVERGENT=$((SESSIONS_DIVERGENT + 1))
+                    # Gravar flag de divergência em arquivo temporário (necessário por causa do subshell)
+                    echo "1" > /tmp/wppconnect_session_divergence
+                else
+                    SESSIONS_OK=$((SESSIONS_OK + 1))
+                fi
+            done
+
+            # Recuperar flag de divergência do subshell
+            if [ -f /tmp/wppconnect_session_divergence ]; then
+                SESSION_DIVERGENCE=1
+                rm -f /tmp/wppconnect_session_divergence
+            fi
+
+            # Recontar sessões após o loop (variáveis no subshell não persistem)
+            SESSIONS_CHECKED=$(echo "$SESSIONS_DATA" | wc -l)
+        fi
+    fi
 fi
 
 log "[ETAPA 3] Resumo: $SESSIONS_CHECKED sessões verificadas | $SESSIONS_OK OK | $SESSIONS_DIVERGENT com divergência"

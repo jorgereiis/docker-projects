@@ -46,6 +46,151 @@ log_separator() {
     echo "============================================================" >> "$LOGFILE"
 }
 
+# Função para enviar notificação WhatsApp após rebuild
+send_notification() {
+    local RESULTADO="$1"  # "sucesso" ou "falha"
+    local MOTIVO="$2"     # Descrição do motivo do rebuild
+    local SESSOES_PROBLEMA="$3"  # Lista de sessões que causaram o rebuild
+
+    log "[NOTIFY] =========================================="
+    log "[NOTIFY] Preparando notificação WhatsApp..."
+
+    # Carregar variáveis do .env do Django
+    DJANGO_ENV="${SCRIPT_DIR}/nossopainel-django/.env"
+    if [ ! -f "$DJANGO_ENV" ]; then
+        log "[NOTIFY] ERRO: Arquivo .env do Django não encontrado: $DJANGO_ENV"
+        return 1
+    fi
+
+    # Extrair MEU_NUM_TIM e URL_API_WPP do .env
+    TELEFONE_ADMIN=$(grep -E "^MEU_NUM_TIM" "$DJANGO_ENV" | cut -d'"' -f2)
+    API_URL_WPP=$(grep -E "^URL_API_WPP" "$DJANGO_ENV" | cut -d"'" -f2)
+
+    if [ -z "$TELEFONE_ADMIN" ]; then
+        log "[NOTIFY] ERRO: MEU_NUM_TIM não encontrado no .env"
+        return 1
+    fi
+
+    log "[NOTIFY] Telefone destino: $TELEFONE_ADMIN"
+    log "[NOTIFY] API URL: $API_URL_WPP"
+
+    # Buscar sessão ativa para enviar (prioridade: jrg, depois qualquer outra)
+    local NOTIFY_SESSION=""
+    local NOTIFY_TOKEN=""
+
+    # Primeiro tenta sessão "jrg"
+    local JRG_TOKEN=$(sqlite3 "$DB_PATH" \
+        "SELECT token FROM cadastros_sessaowpp WHERE usuario = 'jrg' AND is_active = 1;" 2>/dev/null)
+
+    if [ -n "$JRG_TOKEN" ]; then
+        # Verificar se jrg está realmente conectada
+        local JRG_CHECK=$(curl -s --max-time 10 \
+            -H "Authorization: Bearer $JRG_TOKEN" \
+            "${API_URL_WPP}/jrg/check-connection-session" 2>/dev/null)
+
+        if echo "$JRG_CHECK" | grep -q '"status":true'; then
+            NOTIFY_SESSION="jrg"
+            NOTIFY_TOKEN="$JRG_TOKEN"
+            log "[NOTIFY] Usando sessão preferencial: jrg"
+        fi
+    fi
+
+    # Se jrg não está disponível, buscar qualquer sessão conectada
+    if [ -z "$NOTIFY_SESSION" ]; then
+        log "[NOTIFY] Sessão jrg não disponível, buscando alternativa..."
+
+        local SESSIONS=$(sqlite3 -separator '|' "$DB_PATH" \
+            "SELECT usuario, token FROM cadastros_sessaowpp WHERE is_active = 1;" 2>/dev/null)
+
+        while IFS='|' read -r SESS_NAME SESS_TOKEN; do
+            [ -z "$SESS_NAME" ] && continue
+
+            # Verificar se esta sessão está conectada
+            local SESS_CHECK=$(curl -s --max-time 10 \
+                -H "Authorization: Bearer $SESS_TOKEN" \
+                "${API_URL_WPP}/${SESS_NAME}/check-connection-session" 2>/dev/null)
+
+            if echo "$SESS_CHECK" | grep -q '"status":true'; then
+                NOTIFY_SESSION="$SESS_NAME"
+                NOTIFY_TOKEN="$SESS_TOKEN"
+                log "[NOTIFY] Usando sessão alternativa: $NOTIFY_SESSION"
+                break
+            fi
+        done <<< "$SESSIONS"
+    fi
+
+    # Se nenhuma sessão disponível
+    if [ -z "$NOTIFY_SESSION" ]; then
+        log "[NOTIFY] ERRO: Nenhuma sessão WhatsApp conectada para enviar notificação"
+        log "[NOTIFY] =========================================="
+        return 1
+    fi
+
+    # Montar mensagem
+    local TIMESTAMP=$(date '+%d/%m/%Y às %H:%M:%S')
+    local EMOJI STATUS_MSG
+
+    if [ "$RESULTADO" = "sucesso" ]; then
+        EMOJI="✅"
+        STATUS_MSG="REBUILD CONCLUÍDO COM SUCESSO"
+    else
+        EMOJI="❌"
+        STATUS_MSG="REBUILD FALHOU"
+    fi
+
+    # Formatar lista de sessões com problema
+    local SESSOES_FORMATADAS
+    if [ -n "$SESSOES_PROBLEMA" ]; then
+        SESSOES_FORMATADAS=$(echo "$SESSOES_PROBLEMA" | tr '\n' ', ' | sed 's/,$//' | sed 's/,/, /g')
+    else
+        SESSOES_FORMATADAS="Não identificadas"
+    fi
+
+    # Montar mensagem (usando heredoc para preservar formatação)
+    local MENSAGEM=$(cat <<EOF
+🔧 *WPPCONNECT - MANUTENÇÃO AUTOMÁTICA*
+
+$EMOJI *$STATUS_MSG*
+
+📅 *Data/Hora:* $TIMESTAMP
+
+⚠️ *Sessões com problema:* $SESSOES_FORMATADAS
+
+📋 *Motivo:*
+$MOTIVO
+
+🖥️ *Sessão usada para notificação:* $NOTIFY_SESSION
+
+---
+_Mensagem automática do monitor WPPCONNECT_
+EOF
+)
+
+    # Enviar mensagem via API
+    log "[NOTIFY] Enviando mensagem para $TELEFONE_ADMIN via sessão $NOTIFY_SESSION..."
+
+    # Escapar caracteres especiais para JSON
+    local MENSAGEM_JSON=$(echo "$MENSAGEM" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+
+    local SEND_RESP=$(curl -s --max-time 30 \
+        -X POST "${API_URL_WPP}/${NOTIFY_SESSION}/send-message" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $NOTIFY_TOKEN" \
+        -d "{\"phone\": \"$TELEFONE_ADMIN\", \"message\": \"$MENSAGEM_JSON\"}" 2>/dev/null)
+
+    log "[NOTIFY] Resposta da API: $SEND_RESP"
+
+    if echo "$SEND_RESP" | grep -qE '"status"\s*:\s*(true|"success")'; then
+        log "[NOTIFY] SUCESSO: Notificação enviada para $TELEFONE_ADMIN"
+        log "[NOTIFY] =========================================="
+        return 0
+    else
+        log "[NOTIFY] FALHA: Não foi possível enviar notificação"
+        log "[NOTIFY] =========================================="
+        return 1
+    fi
+}
+
 # Função para reiniciar container (solução rápida)
 restart_container() {
     log "[RESTART] =========================================="
@@ -140,11 +285,38 @@ rebuild_container() {
     # Qualquer resposta exceto 000 ou 5xx significa que a API está UP
     if [ "$API_CHECK" != "000" ] && [ "$API_CHECK" -lt 500 ] 2>/dev/null; then
         log "[REBUILD] SUCESSO: Rebuild concluído - API respondendo (HTTP $API_CHECK)"
+
+        # Aguardar mais 30s para sessões reconectarem antes de enviar notificação
+        log "[REBUILD] Aguardando 30 segundos para sessões reconectarem..."
+        sleep 30
+
+        # Ler sessões que causaram o problema
+        local SESSOES_PROBLEMA=""
+        if [ -f /tmp/wppconnect_divergent_sessions ]; then
+            SESSOES_PROBLEMA=$(cat /tmp/wppconnect_divergent_sessions)
+            log "[REBUILD] Sessões que causaram rebuild: $SESSOES_PROBLEMA"
+        fi
+
+        # Enviar notificação de sucesso
+        local MOTIVO="Divergência detectada entre status-session e check-connection (problema de detached frame no Puppeteer). O container foi reconstruído automaticamente para restaurar a funcionalidade."
+        send_notification "sucesso" "$MOTIVO" "$SESSOES_PROBLEMA"
+
         log "[REBUILD] =========================================="
         return 0
     else
         log "[REBUILD] ALERTA: Rebuild concluído mas API não responde (HTTP: $API_CHECK)"
         log "[REBUILD] Pode ser necessário verificar logs do container manualmente"
+
+        # Ler sessões que causaram o problema
+        local SESSOES_PROBLEMA=""
+        if [ -f /tmp/wppconnect_divergent_sessions ]; then
+            SESSOES_PROBLEMA=$(cat /tmp/wppconnect_divergent_sessions)
+        fi
+
+        # Enviar notificação de falha
+        local MOTIVO="Divergência detectada entre status-session e check-connection. O rebuild foi executado mas a API não está respondendo (HTTP: $API_CHECK). Verificação manual necessária."
+        send_notification "falha" "$MOTIVO" "$SESSOES_PROBLEMA"
+
         log "[REBUILD] =========================================="
         return 1
     fi
@@ -335,7 +507,7 @@ else
             log "[ETAPA 3] Sessões ativas encontradas: $TOTAL_SESSIONS"
 
             # Limpar arquivos temporários de contagem
-            rm -f /tmp/wppconnect_session_divergence /tmp/wppconnect_sessions_ok /tmp/wppconnect_sessions_divergent
+            rm -f /tmp/wppconnect_session_divergence /tmp/wppconnect_sessions_ok /tmp/wppconnect_sessions_divergent /tmp/wppconnect_divergent_sessions
             echo "0" > /tmp/wppconnect_sessions_ok
             echo "0" > /tmp/wppconnect_sessions_divergent
 
@@ -351,6 +523,8 @@ else
                 if ! check_session "$SESSION_NAME" "$TOKEN"; then
                     # Gravar flags em arquivos temporários (necessário por causa do subshell)
                     echo "1" > /tmp/wppconnect_session_divergence
+                    # Salvar nome da sessão com problema para notificação
+                    echo "$SESSION_NAME" >> /tmp/wppconnect_divergent_sessions
                     # Incrementar contador de divergentes
                     COUNT=$(cat /tmp/wppconnect_sessions_divergent)
                     echo $((COUNT + 1)) > /tmp/wppconnect_sessions_divergent

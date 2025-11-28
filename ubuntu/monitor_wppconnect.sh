@@ -51,8 +51,9 @@ restart_container() {
         API_CHECK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${API_URL}/" 2>/dev/null)
         log "[RESTART] Verificação pós-restart: API respondeu HTTP $API_CHECK"
 
-        if [ "$API_CHECK" = "200" ]; then
-            log "[RESTART] Container reiniciado e API respondendo normalmente"
+        # Qualquer resposta exceto 000 ou 5xx significa que a API está UP
+        if [ "$API_CHECK" != "000" ] && [ "$API_CHECK" -lt 500 ] 2>/dev/null; then
+            log "[RESTART] Container reiniciado e API respondendo (HTTP $API_CHECK)"
         else
             log "[RESTART] ALERTA: Container reiniciado mas API não responde (HTTP: $API_CHECK)"
         fi
@@ -72,7 +73,24 @@ rebuild_container() {
     log "[REBUILD] Isso geralmente indica problema de 'detached frame' no Puppeteer"
     log "[REBUILD] =========================================="
 
-    cd "${SCRIPT_DIR}/ubuntu" || { log "[REBUILD] ERRO: Diretório ubuntu não encontrado em ${SCRIPT_DIR}"; return 1; }
+    # Detectar diretório do docker-compose automaticamente
+    COMPOSE_DIR=""
+    if [ -f "${SCRIPT_DIR}/ubuntu/wppconnect-build.yml" ]; then
+        COMPOSE_DIR="${SCRIPT_DIR}/ubuntu"
+    elif [ -f "${SCRIPT_DIR}/wppconnect-build.yml" ]; then
+        COMPOSE_DIR="${SCRIPT_DIR}"
+    elif [ -f "${SCRIPT_DIR}/../wppconnect-build.yml" ]; then
+        COMPOSE_DIR="${SCRIPT_DIR}/.."
+    else
+        log "[REBUILD] ERRO: Não foi possível encontrar wppconnect-build.yml"
+        log "[REBUILD] Locais verificados:"
+        log "[REBUILD]   - ${SCRIPT_DIR}/ubuntu/wppconnect-build.yml"
+        log "[REBUILD]   - ${SCRIPT_DIR}/wppconnect-build.yml"
+        log "[REBUILD]   - ${SCRIPT_DIR}/../wppconnect-build.yml"
+        return 1
+    fi
+
+    cd "$COMPOSE_DIR" || { log "[REBUILD] ERRO: Não foi possível acessar $COMPOSE_DIR"; return 1; }
     log "[REBUILD] Diretório de trabalho: $(pwd)"
 
     # Parar container
@@ -107,9 +125,11 @@ rebuild_container() {
     # Verificar se voltou
     log "[REBUILD] Verificando se API está respondendo..."
     API_CHECK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${API_URL}/" 2>/dev/null)
+    log "[REBUILD] Resposta HTTP: $API_CHECK"
 
-    if [ "$API_CHECK" = "200" ]; then
-        log "[REBUILD] SUCESSO: Rebuild concluído - API respondendo (HTTP 200)"
+    # Qualquer resposta exceto 000 ou 5xx significa que a API está UP
+    if [ "$API_CHECK" != "000" ] && [ "$API_CHECK" -lt 500 ] 2>/dev/null; then
+        log "[REBUILD] SUCESSO: Rebuild concluído - API respondendo (HTTP $API_CHECK)"
         log "[REBUILD] =========================================="
         return 0
     else
@@ -226,12 +246,34 @@ log "[ETAPA 2] Timeout: 10 segundos"
 API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${API_URL}/" 2>/dev/null)
 log "[ETAPA 2] Resposta HTTP: $API_STATUS"
 
-if [ "$API_STATUS" != "200" ]; then
-    log "[ETAPA 2] PROBLEMA: API não responde corretamente (HTTP: $API_STATUS)"
+# Avaliar resposta:
+# - 000 = Falha de conexão (curl não conseguiu conectar)
+# - 5xx = Erro interno do servidor
+# - 200, 404, 401, 403 = API está respondendo (servidor está UP)
+#
+# Nota: 404 na rota raiz /api/ é normal - significa que a API está UP mas não tem rota nesse path
+
+API_IS_DOWN=false
+
+if [ "$API_STATUS" = "000" ]; then
+    log "[ETAPA 2] PROBLEMA: Falha de conexão (HTTP 000)"
     log "[ETAPA 2] Possíveis causas:"
-    log "[ETAPA 2]   - Serviço ainda inicializando"
-    log "[ETAPA 2]   - Erro interno no servidor"
-    log "[ETAPA 2]   - Problema de rede/porta"
+    log "[ETAPA 2]   - Container não está expondo a porta"
+    log "[ETAPA 2]   - Problema de rede/DNS"
+    log "[ETAPA 2]   - Timeout de conexão"
+    API_IS_DOWN=true
+elif [ "$API_STATUS" -ge 500 ] 2>/dev/null; then
+    log "[ETAPA 2] PROBLEMA: Erro interno do servidor (HTTP $API_STATUS)"
+    log "[ETAPA 2] Possíveis causas:"
+    log "[ETAPA 2]   - Serviço com erro fatal"
+    log "[ETAPA 2]   - Falta de memória/recursos"
+    API_IS_DOWN=true
+elif [ -z "$API_STATUS" ]; then
+    log "[ETAPA 2] PROBLEMA: Resposta vazia do curl"
+    API_IS_DOWN=true
+fi
+
+if [ "$API_IS_DOWN" = true ]; then
     log "[ETAPA 2] Ação: Reiniciando container..."
     restart_container
     echo "0" > "$DIVERGENCE_FILE"
@@ -240,11 +282,36 @@ if [ "$API_STATUS" != "200" ]; then
     exit 0
 fi
 
-log "[ETAPA 2] OK: API respondendo (HTTP 200)"
+# API está respondendo (qualquer código 1xx-4xx é válido)
+log "[ETAPA 2] OK: API respondendo (HTTP $API_STATUS)"
+if [ "$API_STATUS" = "404" ]; then
+    log "[ETAPA 2] Nota: 404 na rota raiz é normal - a API está UP, apenas não tem handler nesse path"
+fi
 
 # Etapa 3: Verificar sessões
 log "[ETAPA 3] Verificando sessões existentes..."
-TOKENS_DIR="${SCRIPT_DIR}/ubuntu/wppconnect-server/tokens"
+
+# Detectar diretório de tokens automaticamente
+# Possíveis localizações:
+#   - ${SCRIPT_DIR}/ubuntu/wppconnect-server/tokens (se script está em /Docker/)
+#   - ${SCRIPT_DIR}/wppconnect-server/tokens (se script está em /Docker/ubuntu/)
+#   - ${SCRIPT_DIR}/../wppconnect-server/tokens (se script está em outro lugar)
+
+TOKENS_DIR=""
+if [ -d "${SCRIPT_DIR}/ubuntu/wppconnect-server/tokens" ]; then
+    TOKENS_DIR="${SCRIPT_DIR}/ubuntu/wppconnect-server/tokens"
+elif [ -d "${SCRIPT_DIR}/wppconnect-server/tokens" ]; then
+    TOKENS_DIR="${SCRIPT_DIR}/wppconnect-server/tokens"
+elif [ -d "${SCRIPT_DIR}/../wppconnect-server/tokens" ]; then
+    TOKENS_DIR="${SCRIPT_DIR}/../wppconnect-server/tokens"
+else
+    log "[ETAPA 3] ERRO: Não foi possível encontrar diretório de tokens"
+    log "[ETAPA 3] Locais verificados:"
+    log "[ETAPA 3]   - ${SCRIPT_DIR}/ubuntu/wppconnect-server/tokens"
+    log "[ETAPA 3]   - ${SCRIPT_DIR}/wppconnect-server/tokens"
+    log "[ETAPA 3]   - ${SCRIPT_DIR}/../wppconnect-server/tokens"
+fi
+
 log "[ETAPA 3] Diretório de tokens: $TOKENS_DIR"
 
 SESSION_DIVERGENCE=0
@@ -336,7 +403,7 @@ log "[MONITOR] =========================================="
 log "[MONITOR] Verificação concluída"
 log "[MONITOR] Status final:"
 log "[MONITOR]   - Container: Rodando"
-log "[MONITOR]   - API: Respondendo (HTTP 200)"
+log "[MONITOR]   - API: Respondendo (HTTP $API_STATUS)"
 log "[MONITOR]   - Sessões verificadas: $SESSIONS_CHECKED"
 log "[MONITOR]   - Sessões OK: $SESSIONS_OK"
 log "[MONITOR]   - Sessões com divergência: $SESSIONS_DIVERGENT"

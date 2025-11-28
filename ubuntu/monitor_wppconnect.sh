@@ -334,6 +334,11 @@ else
             TOTAL_SESSIONS=$(echo "$SESSIONS_DATA" | wc -l)
             log "[ETAPA 3] Sessões ativas encontradas: $TOTAL_SESSIONS"
 
+            # Limpar arquivos temporários de contagem
+            rm -f /tmp/wppconnect_session_divergence /tmp/wppconnect_sessions_ok /tmp/wppconnect_sessions_divergent
+            echo "0" > /tmp/wppconnect_sessions_ok
+            echo "0" > /tmp/wppconnect_sessions_divergent
+
             # Iterar sobre cada sessão (formato: usuario|token)
             echo "$SESSIONS_DATA" | while IFS='|' read -r SESSION_NAME TOKEN; do
                 if [ -z "$SESSION_NAME" ] || [ -z "$TOKEN" ]; then
@@ -343,25 +348,29 @@ else
 
                 log "[ETAPA 3] Sessão: $SESSION_NAME | Token: ${TOKEN:0:20}..."
 
-                SESSIONS_CHECKED=$((SESSIONS_CHECKED + 1))
-
                 if ! check_session "$SESSION_NAME" "$TOKEN"; then
-                    SESSION_DIVERGENCE=1
-                    SESSIONS_DIVERGENT=$((SESSIONS_DIVERGENT + 1))
-                    # Gravar flag de divergência em arquivo temporário (necessário por causa do subshell)
+                    # Gravar flags em arquivos temporários (necessário por causa do subshell)
                     echo "1" > /tmp/wppconnect_session_divergence
+                    # Incrementar contador de divergentes
+                    COUNT=$(cat /tmp/wppconnect_sessions_divergent)
+                    echo $((COUNT + 1)) > /tmp/wppconnect_sessions_divergent
                 else
-                    SESSIONS_OK=$((SESSIONS_OK + 1))
+                    # Incrementar contador de OK
+                    COUNT=$(cat /tmp/wppconnect_sessions_ok)
+                    echo $((COUNT + 1)) > /tmp/wppconnect_sessions_ok
                 fi
             done
 
-            # Recuperar flag de divergência do subshell
+            # Recuperar contadores do subshell
             if [ -f /tmp/wppconnect_session_divergence ]; then
                 SESSION_DIVERGENCE=1
                 rm -f /tmp/wppconnect_session_divergence
             fi
+            SESSIONS_OK=$(cat /tmp/wppconnect_sessions_ok 2>/dev/null || echo "0")
+            SESSIONS_DIVERGENT=$(cat /tmp/wppconnect_sessions_divergent 2>/dev/null || echo "0")
+            rm -f /tmp/wppconnect_sessions_ok /tmp/wppconnect_sessions_divergent
 
-            # Recontar sessões após o loop (variáveis no subshell não persistem)
+            # Contar sessões verificadas
             SESSIONS_CHECKED=$(echo "$SESSIONS_DATA" | wc -l)
         fi
     fi

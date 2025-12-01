@@ -213,8 +213,10 @@ write_monitor_result() {
     # Construir bloco de resultado estruturado
     {
         echo "================================================================================"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] CICLO DE MONITORAMENTO #$cycle_number"
+        echo "CICLO DE MONITORAMENTO #$cycle_number"
         echo "================================================================================"
+        echo ""
+        echo "DATA/HORA: $(date '+%Y-%m-%d %H:%M:%S')"
         echo ""
         echo "CONTAINER"
         echo "├─ Status: $CONTAINER_STATUS_TEXT"

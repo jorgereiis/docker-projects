@@ -1,0 +1,1880 @@
+.page-item.active .page-link {
+        background-color: rgb(12, 20, 28);
+        border-color: rgb(12, 20, 28);
+    }
+
+    .page-link {
+        color: #333;
+    }
+
+    .page-link:hover {
+        color: #666;
+    }
+
+    #searchInput {
+        border-radius: 0.75rem;
+    }
+
+    #button-pesquisar {
+        display: none;
+    }
+
+    .objeto {
+        transition: transform 0.3s ease;
+    }
+
+    .objeto:hover {
+        transform: translateY(-5px);
+    }
+
+
+    span.title {
+        font-weight: bold;
+    }
+
+    .child span {
+        width: 120px;
+    }
+
+    #eye {
+        cursor: pointer;
+    }
+    #modal-info-header {
+    padding: 0;
+    height: 5rem;
+    border-bottom: none;
+    margin-bottom: -10px;
+    }
+
+    #modal-info-content {
+        padding: 0;
+    }
+
+    .custom-div {
+        margin-top: -10px;
+        margin-bottom: -10px;
+    }
+
+    #modal-info-body {
+        padding: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        color: black;
+    }
+
+    .custom-modal-dialog {
+        width: 900px;
+        max-width: 100%;
+    }
+
+    .fs-9 {
+        font-size: 10pt;
+    }
+    
+    .rounded-pill {
+        font-size: 10pt;
+    }
+    .pill-invoice {
+        font-size: 8pt;
+    }
+    .pill-invoice-small {
+        font-size: 7pt;
+        padding: 0.25rem 0.5rem;
+    }
+    .charge-summary-max-width {
+    max-width: 800px;
+    flex-wrap: wrap;
+    }
+    .num-resumo {
+    font-size: 30pt;
+    }
+    
+    /* new moda-info style */
+    .table-center th,
+    .table-center td {
+        text-align: center !important;
+        vertical-align: middle !important;
+    }
+    .charge-summary {
+    flex-wrap: wrap;
+    }
+
+    .card-dashboard-tabs {
+        border: none;
+        background: transparent;
+        --dashboard-panel-bg: var(--bs-body-bg, #ffffff);
+    }
+
+    body.bg-light .card-dashboard-tabs {
+        --dashboard-panel-bg: var(--bs-light-bg-subtle, #f8f9fa);
+    }
+
+    .dashboard-tabs-surface {
+        background: #f4f7ff;
+        border: 1px solid #dfe3f5;
+        border-bottom: 0;
+        border-radius: 1.25rem 1.25rem 0 0;
+        padding: 1.1rem 1.75rem 0;
+        position: relative;
+    }
+
+    .dashboard-tabs {
+        border-bottom: none;
+        gap: 0.75rem;
+    }
+
+    .dashboard-tabs .nav-link {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.85rem 1.25rem;
+        color: #6c7aa5;
+        font-weight: 600;
+        border-radius: 1rem 1rem 0 0;
+        border: 1px solid transparent;
+        border-bottom: 0;
+        background: transparent;
+        transition: all 0.2s ease-in-out;
+        margin-bottom: -1px;
+    }
+
+    .dashboard-tabs .nav-link:hover {
+        background: rgba(255, 255, 255, 0.8);
+        color: #2643b7;
+    }
+
+    .dashboard-tabs .nav-link.active {
+        background: var(--dashboard-panel-bg);
+        color: #1d3a8a;
+        border-color: #dfe3f5;
+        box-shadow: none;
+        z-index: 3;
+    }
+
+    .dashboard-tabs .nav-link:not(.active) {
+        background: rgba(255, 255, 255, 0.55);
+        color: #8290b3;
+    }
+
+    .dashboard-tab-content {
+        border: 1px solid #dfe3f5;
+        border-top: 0;
+        border-radius: 0 0 1.25rem 1.25rem;
+        padding: 1.75rem 2.25rem 1.5rem;
+        background: var(--dashboard-panel-bg);
+        margin-top: -1px;
+        width: 100%;
+    }
+
+    .dashboard-tab-body {
+        padding: 0;
+    }
+
+    .dashboard-tab-icon {
+        border: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        background: var(--dashboard-tab-icon-bg, #e0dcfe);
+        color: var(--dashboard-tab-icon-color, #624bff);
+        font-size: 1.25rem;
+    }
+
+    .tab-icon-renovacoes {
+        --dashboard-tab-icon-bg: #e0dcfe;
+        --dashboard-tab-icon-color: #624bff;
+    }
+
+    .tab-icon-evolucao {
+        --dashboard-tab-icon-bg: #e7fafe;
+        --dashboard-tab-icon-color: #0ea5e9;
+    }
+
+    .tab-icon-adesao {
+        --dashboard-tab-icon-bg: #fef3c7;
+        --dashboard-tab-icon-color: #f97316;
+    }
+
+    .clientes-servidor-card {
+        border: none;
+        background: linear-gradient(135deg, rgba(98, 75, 255, 0.06), rgba(255, 255, 255, 0.95));
+        box-shadow: 0 18px 40px -30px rgba(36, 33, 69, 0.4);
+        min-height: 340px;
+    }
+    .clientes-servidor-canvas {
+        position: relative;
+        width: 100%;
+        flex-grow: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 1.5rem;
+        max-width: 600px;
+        margin: 0 auto;
+        min-height: 260px;
+    }
+    .clientes-servidor-canvas-element {
+        width: 240px;
+        height: 240px;
+        max-width: 100%;
+        max-height: 240px;
+    }
+    .clientes-servidor-loading,
+    .clientes-servidor-empty {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 500;
+        color: #677097;
+        text-align: center;
+        padding: 1rem 2rem;
+        background: rgba(255, 255, 255, 0.75);
+        border-radius: 1rem;
+        z-index: 2;
+    }
+    .clientes-servidor-legend {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.5rem 1rem;
+        margin: 1rem auto 0;
+        font-size: 0.82rem;
+        justify-content: center;
+        justify-items: flex-start;
+        width: min(100%, 420px);
+    }
+    .clientes-servidor-legend-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.6rem;
+        font-weight: 500;
+        color: #2f2b53;
+        word-break: break-word;
+    }
+    .clientes-servidor-legend-text {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.35rem;
+        line-height: 1.3;
+        min-width: 0;
+        white-space: normal;
+    }
+    .clientes-servidor-legend-item strong {
+        white-space: nowrap;
+    }
+    .clientes-servidor-legend-color {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    }
+    .clientes-servidor-legend-note {
+        grid-column: 1 / -1;
+        font-weight: 400;
+        color: #677097;
+        font-size: 0.75rem;
+        line-height: 1.2;
+        margin-top: 0.25rem;
+    }
+
+    .dashboard-tab-label {
+        font-size: 1rem;
+    }
+
+    .dashboard-search {
+        display: flex;
+        width: 100%;
+    }
+
+    .dashboard-search .form-control {
+        border-radius: 0.75rem;
+        padding: 0.75rem 1rem;
+        border: 1px solid #d9dff1;
+        background-color: #ffffff;
+    }
+
+    .dashboard-search .form-control:focus {
+        box-shadow: 0 0 0 0.25rem rgba(98, 75, 255, 0.25);
+        border-color: #b1a5ff;
+    }
+
+    .mapa-clientes-card {
+        border: none;
+        background: linear-gradient(135deg, rgba(98, 75, 255, 0.07), rgba(255, 255, 255, 0.9));
+        box-shadow: 0 22px 45px -32px rgba(35, 25, 94, 0.45);
+    }
+    .mapa-summary-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.35rem 0.85rem;
+        border-radius: 999px;
+        background: rgba(98, 75, 255, 0.08);
+        color: #5746c9;
+        font-weight: 600;
+    }
+    .mapa-clientes-canvas {
+        position: relative;
+        width: 100%;
+        min-height: 360px;
+        border-radius: 1rem;
+        background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        overflow: hidden;
+    }
+    .mapa-clientes-loading,
+    .mapa-clientes-error {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 500;
+        color: #6b76a8;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.85), rgba(248, 249, 255, 0.95));
+        z-index: 2;
+    }
+    .mapa-clientes-svg {
+        width: 100%;
+        height: 100%;
+    }
+    .mapa-clientes-svg path {
+        fill: #e9e6ff;
+        transition: transform 0.25s ease, filter 0.25s ease, fill 0.2s ease;
+        transform-box: fill-box;
+        transform-origin: center;
+        stroke: rgba(255, 255, 255, 0.9);
+        stroke-width: 0.75;
+        filter: drop-shadow(0 12px 24px rgba(57, 39, 114, 0.08));
+    }
+    .mapa-clientes-svg path.mapa-estado-inativo {
+        cursor: default !important;
+        transition: none;
+    }
+    .mapa-clientes-svg path.mapa-estado-inativo:hover {
+        transform: none !important;
+        filter: none !important;
+        fill: #f3f1ff !important;
+    }
+    .mapa-clientes-svg path.mapa-estado-ativo.is-hover {
+        transform: translateY(-6px) scale(1.035);
+        filter: drop-shadow(0 18px 28px rgba(98, 75, 255, 0.28));
+        fill: #6f58ff !important;
+        stroke-width: 1.4;
+    }
+    .mapa-clientes-tooltip {
+        position: fixed;
+        pointer-events: none;
+        background: #ffffff;
+        border-radius: 14px;
+        padding: 0.85rem 1.1rem;
+        box-shadow: 0 24px 44px -20px rgba(27, 21, 68, 0.55);
+        border: 1px solid rgba(98, 75, 255, 0.18);
+        color: #29274b;
+        font-size: 0.85rem;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+        max-width: 240px;
+        z-index: 9999;
+    }
+    .mapa-clientes-tooltip strong {
+        display: block;
+        font-weight: 700;
+        margin-bottom: 0.4rem;
+        color: #1f1b3d;
+    }
+    .mapa-clientes-tooltip span {
+        display: block;
+        color: #5d688f;
+        font-size: 0.78rem;
+    }
+    @media (max-width: 768px) {
+        .mapa-clientes-canvas {
+            min-height: 320px;
+        }
+    }
+
+    /* ========== TOP 5 Estados ========== */
+    .mapa-top5-container {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .mapa-top5-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #1f1b3d;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid rgba(98, 75, 255, 0.15);
+    }
+
+    .mapa-top5-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .mapa-top5-item {
+        padding: 0.6rem 0.75rem;
+        border-radius: 0.5rem;
+        background: rgba(98, 75, 255, 0.04);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .mapa-top5-item:hover,
+    .mapa-top5-item.is-active {
+        background: rgba(98, 75, 255, 0.12);
+        transform: translateX(4px);
+    }
+
+    .mapa-top5-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.4rem;
+    }
+
+    .mapa-top5-name {
+        font-weight: 600;
+        color: #29274b;
+        font-size: 0.85rem;
+    }
+
+    .mapa-top5-stats {
+        font-size: 0.8rem;
+        color: #5d688f;
+    }
+
+    .mapa-top5-stats strong {
+        color: #624bff;
+    }
+
+    /* Barra de progresso */
+    .mapa-top5-bar-bg {
+        height: 6px;
+        background: rgba(98, 75, 255, 0.12);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+
+    .mapa-top5-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #624bff, #8b6aff);
+        border-radius: 3px;
+        transition: width 0.4s ease;
+    }
+
+    .mapa-top5-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        min-height: 200px;
+    }
+
+    /* Responsividade TOP 5 - mobile: lista abaixo do mapa */
+    @media (max-width: 991px) {
+        .mapa-top5-container {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(98, 75, 255, 0.1);
+        }
+
+        .mapa-top5-list {
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .mapa-top5-item {
+            flex: 1 1 calc(50% - 0.5rem);
+            min-width: 140px;
+        }
+    }
+
+    @media (max-width: 576px) {
+        .mapa-top5-item {
+            flex: 1 1 100%;
+        }
+    }
+
+    @media (max-width: 576px) {
+    .dashboard-tabs-surface {
+        padding: 0.75rem;
+    }
+    .dashboard-tabs .nav-link {
+        width: 100%;
+        justify-content: center;
+    }
+    .dashboard-tab-content {
+        padding: 1.5rem 1.25rem;
+    }
+    }
+
+    @media (max-width: 576px) {
+    .custom-modal-dialog {
+        min-width: 310px !important;
+        width: 98vw !important;
+        margin: 0 auto !important;
+    }
+    .modal-content {
+        padding: 1.25rem 1rem !important;
+        overflow-y: auto;
+        scrollbar-width: none; /* Firefox */
+        -ms-overflow-style: none;  /* IE e Edge */
+    }
+    #modal-info-body-1 .row > [class*="col-"] {
+        flex: 0 0 50% !important;
+        max-width: 50% !important;
+        margin-bottom: 0.75rem !important;
+    }
+    /* Para garantir que linhas com apenas uma coluna continuem ocupando 100% */
+    #modal-info-body-1 .row > [class*="col-"]:only-child {
+        flex: 0 0 100% !important;
+        max-width: 100% !important;
+    }
+    }
+
+    @media (max-width: 767px) {
+    .charge-summary {
+        flex-direction: column !important;
+        align-items: center !important;
+        gap: 1rem !important;
+    }
+    .charge-summary .card {
+        width: 100% !important;
+        max-width: 320px !important;
+        margin-bottom: 1rem;
+    }
+    .modal-content {
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+
+    .dados-apps {
+        flex-direction: column !important;
+        align-items: center !important;
+    }
+    .table-responsive {
+        overflow-x: auto;
+    }
+    }
+    
+    @media (max-width: 991px) {
+    .modal-xl {
+        max-width: 98vw;
+    }
+    }
+    /* ajustar para permitir entre 4 e 1 card dos apps conforme tamanho do modal */
+    .dados-apps {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+        padding-right: 1rem;
+        justify-items: center;
+        max-width: 900px;
+        margin: 0 auto;
+    }
+
+    @media (max-width: 1200px) {
+    .dados-apps {
+        grid-template-columns: repeat(3, 1fr); /* até 3 por linha */
+    }
+    }
+    @media (max-width: 900px) {
+    .dados-apps {
+        grid-template-columns: repeat(2, 1fr); /* até 2 por linha */
+    }
+    }
+    @media (max-width: 576px) {
+    .dados-apps {
+        grid-template-columns: 1fr; /* apenas 1 por linha */
+    }
+    }
+
+    /* ========== CARDS MODERNOS DE CONTA DO APLICATIVO ========== */
+
+    /* Container principal do card */
+    .app-card-modern {
+        position: relative;
+        width: 100%;
+        max-width: 280px;
+        border-radius: 1rem;
+        overflow: visible;
+        background: white;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border: 1px solid rgba(98, 75, 255, 0.1);
+    }
+
+    .app-card-modern:hover {
+        transform: translateY(-6px);
+        box-shadow: 0 10px 28px rgba(98, 75, 255, 0.12);
+        border-color: rgba(98, 75, 255, 0.25);
+    }
+
+    /* Conteúdo do card */
+    .app-card-content {
+        position: relative;
+        padding: 1.5rem 1.25rem 1.25rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 0.875rem;
+    }
+
+    /* Logo circular ampliada */
+    .app-card-logo {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        border: 2px solid white;
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+        object-fit: cover;
+        transition: all 0.3s ease;
+        margin-bottom: 0.25rem;
+    }
+
+    .app-card-modern:hover .app-card-logo {
+        transform: scale(1.08);
+        box-shadow: 0 5px 20px rgba(13, 110, 253, 0.2);
+        border-color: #0d6efd;
+    }
+
+    /* Título do app */
+    .app-card-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #1f2937;
+        margin: 0;
+        line-height: 1.2;
+    }
+
+    /* Seção de informações técnicas */
+    .app-card-info {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+    }
+
+    .app-card-info-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        align-items: flex-start;
+        width: 100%;
+    }
+
+    /* Label das informações */
+    .app-card-info-label {
+        font-size: 0.7rem;
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-weight: 600;
+        padding-left: 0.25rem;
+    }
+
+    /* Container do valor + botão copiar */
+    .app-card-info-value-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        width: 100%;
+        background: #f3f4f6;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.5rem;
+        transition: all 0.2s ease;
+        border: 1px solid transparent;
+    }
+
+    .app-card-info-value-wrapper:hover {
+        background: #e5e7eb;
+        border-color: rgba(98, 75, 255, 0.2);
+    }
+
+    /* Valor da informação */
+    .app-card-info-value {
+        flex: 1;
+        font-size: 0.8rem;
+        color: #374151;
+        font-family: 'Courier New', 'Consolas', monospace;
+        word-break: break-all;
+        letter-spacing: 0.2px;
+        text-align: left;
+    }
+
+    /* Botão copiar */
+    .app-card-copy-btn {
+        flex-shrink: 0;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.25rem;
+        color: #6b7280;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.85rem;
+        border-radius: 0.25rem;
+    }
+
+    .app-card-copy-btn:hover {
+        color: #624bff;
+        background: rgba(98, 75, 255, 0.1);
+        transform: scale(1.08);
+    }
+
+    .app-card-copy-btn:active {
+        transform: scale(0.95);
+    }
+
+    .app-card-copy-btn.copied {
+        color: #16a34a;
+        background: rgba(22, 163, 74, 0.1);
+    }
+
+    /* Botão deletar (ícone discreto no canto superior direito) */
+    .app-card-delete-btn {
+        position: absolute;
+        top: 0.65rem;
+        right: 0.65rem;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        color: #9ca3af;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        z-index: 10;
+        opacity: 0.7;
+    }
+
+    .app-card-delete-btn:hover {
+        background: rgba(220, 38, 38, 0.1);
+        color: #dc2626;
+        transform: scale(1.1);
+        opacity: 1;
+    }
+
+    .app-card-delete-btn:active {
+        transform: scale(0.92);
+        background: rgba(220, 38, 38, 0.15);
+    }
+
+    .app-card-delete-btn i {
+        font-size: 1.1rem;
+    }
+
+    /* Dispositivo - abaixo do nome do app */
+    .app-card-device {
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: #6b7280;
+        margin: -0.5rem 0 0.5rem 0;
+        line-height: 1.3;
+    }
+
+    /* Mensagem de app sem conta */
+    .app-card-no-account {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        background: #f9fafb;
+        border-radius: 0.5rem;
+        color: #6b7280;
+        font-size: 0.85rem;
+        font-style: italic;
+    }
+
+    .app-card-no-account i {
+        font-size: 1.1rem;
+    }
+
+    /* Hover effect para badge de telas na tabela do dashboard */
+    #myTable tbody .badge {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    #myTable tbody tr:hover .badge {
+        transform: translateY(-1px);
+    }
+
+    /* Hover específico por tipo de badge */
+    #myTable tbody tr:hover .bg-primary-subtle {
+        box-shadow: 0 2px 6px rgba(13, 110, 253, 0.3);
+    }
+
+    #myTable tbody tr:hover .bg-warning-subtle {
+        box-shadow: 0 2px 6px rgba(255, 193, 7, 0.4);
+    }
+
+    #myTable tbody tr:hover .bg-info-subtle {
+        box-shadow: 0 2px 6px rgba(13, 202, 240, 0.3);
+    }
+
+    /* Animação pulsante para badge WARNING (apps insuficientes) */
+    #myTable .badge-pulse-warning {
+        animation: pulseAlertWarning 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulseAlertWarning {
+        0%, 100% {
+            box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.4);
+        }
+        50% {
+            box-shadow: 0 0 0 6px rgba(255, 193, 7, 0);
+        }
+    }
+
+    /* Responsividade específica dos cards */
+    @media (max-width: 576px) {
+        .app-card-modern {
+            max-width: 100%;
+        }
+
+        .app-card-content {
+            padding: 1.25rem 1rem 1rem;
+        }
+
+        .app-card-title {
+            font-size: 1.1rem;
+        }
+
+        .app-card-logo {
+            width: 55px;
+            height: 55px;
+        }
+    }
+
+    /* limitar a altura das tabelas, permitir scroll e fixar o cabeçalho no modal info */
+    .custom-table-scroll {
+        max-height: 320px;
+        overflow-y: auto;
+        /* Para garantir que não tenha rolagem horizontal indesejada */
+        overflow-x: hidden;
+    }
+    #table-invoice thead th, #table-invoice thead td, #table-indicados thead th, #table-indicados thead td {
+        position: sticky;
+        top: 0;
+        background: #fff; /* ou a cor do seu header */
+        z-index: 2;
+    }
+
+/* Estilo para o campo de telefone */
+  .iti {
+    width: 100%;
+  }
+
+  .iti__country-list {
+    z-index: 10000;
+  }
+
+.table-responsive.table-actions-visible {
+    position: relative;
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+/* Dropdown menu com z-index alto */
+.table-responsive.table-actions-visible .table-dropdown-actions .dropdown-menu {
+    z-index: 10050 !important;
+}
+
+/* ========================================
+   Table Sortable Styles
+   ======================================== */
+
+/* Estilos para colunas ordenáveis */
+#myTable thead th[data-sort-type] {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+/* Indicador visual de ordenação ascendente */
+#myTable thead th.sorted-asc::after {
+    content: " \25B2";
+    font-size: 0.75rem;
+    color: #624bff;
+}
+
+/* Indicador visual de ordenação descendente */
+#myTable thead th.sorted-desc::after {
+    content: " \25BC";
+    font-size: 0.75rem;
+    color: #624bff;
+}
+
+/* Hover state para cabeçalhos ordenáveis */
+#myTable thead th[data-sort-type]:hover {
+    background-color: rgba(98, 75, 255, 0.05);
+}
+
+/* ===== MELHORIAS UI/UX TABELA DE CLIENTES ===== */
+
+/* Efeito hover suave nas linhas da tabela */
+#myTable tbody tr {
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#myTable tbody tr:hover {
+    background-color: rgba(98, 75, 255, 0.03);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* Animação suave no nome do cliente ao hover */
+#myTable tbody tr:hover .text-dark {
+    color: #624BFF !important;
+}
+
+/* Efeito hover nos avatares de servidor */
+#myTable tbody .flex-shrink-0 img {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#myTable tbody tr:hover .flex-shrink-0 img {
+    transform: scale(1.08);
+    box-shadow: 0 4px 12px rgba(98, 75, 255, 0.2);
+}
+
+/* Efeito hover nos ícones de forma de pagamento */
+#myTable tbody .rounded-circle.bg-light {
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+#myTable tbody tr:hover .rounded-circle.bg-light {
+    background-color: #f8f9fa !important;
+    transform: scale(1.1);
+}
+
+/* Badges de status com animação */
+#myTable tbody .badge {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#myTable tbody tr:hover .badge {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Botão de ações com animação */
+#myTable tbody .dropdown button {
+    transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* ===== DROPDOWN DA TABELA - ESTILO PREMIUM ===== */
+
+/* Menu dropdown com design moderno */
+#myTable .dropdown-menu {
+    min-width: 220px;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+    padding: 0.5rem 0;
+    margin-top: 4px;
+    overflow: hidden;
+    z-index: 9999 !important;
+}
+
+/* Animação de fade-in ao abrir */
+#myTable .dropdown-menu.show {
+    animation: tableDropdownFadeIn 0.2s ease-out;
+    z-index: 10000 !important;
+}
+
+@keyframes tableDropdownFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Posicionamento correto do dropdown */
+#myTable .dropdown {
+    position: relative;
+}
+
+/* REMOVIDO: Estilos movidos para .table-dropdown-item (linha ~1332) */
+
+/* Badge de dispositivo responsivo */
+#myTable .badge.bg-light {
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+#myTable tbody tr:hover .badge.bg-light {
+    background-color: rgba(98, 75, 255, 0.1) !important;
+    color: #624BFF !important;
+    border-color: #624BFF !important;
+}
+
+/* Ícone de check do último pagamento com pulse */
+#myTable .bi-check-circle-fill {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* Bordas suaves na tabela */
+#myTable {
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+/* Espaçamento otimizado das células */
+#myTable tbody td {
+    padding: 0.65rem 0.75rem;
+    vertical-align: middle;
+}
+
+/* Centralizar cabeçalhos da tabela */
+#myTable thead th {
+    text-align: center !important;
+}
+
+/* Indicador de status vencido pulsante */
+#myTable .bg-danger-subtle {
+    animation: pulseAlert 1.5s ease-in-out infinite;
+}
+
+@keyframes pulseAlert {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 6px rgba(220, 53, 69, 0);
+    }
+}
+
+/* ===== MELHORIAS UI/UX TABELA DE SERVIDORES ===== */
+
+/* Efeito hover suave nas linhas da tabela de servidores */
+#servidoresTable tbody tr {
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#servidoresTable tbody tr:hover {
+    background-color: rgba(98, 75, 255, 0.03);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* Animação suave no nome do servidor ao hover */
+#servidoresTable tbody tr:hover .text-dark {
+    color: #624BFF !important;
+}
+
+/* Efeito hover nos avatares de servidor */
+#servidoresTable tbody .flex-shrink-0 img {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#servidoresTable tbody tr:hover .flex-shrink-0 img {
+    transform: scale(1.1);
+    box-shadow: 0 4px 16px rgba(98, 75, 255, 0.25);
+}
+
+/* Botão de ações com animação - já incluído no bloco compartilhado abaixo */
+/* (ver linhas ~868-902 para estilos compartilhados) */
+
+/* Menu dropdown - estilo premium */
+#servidoresTable .dropdown-menu {
+    min-width: 220px;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+    padding: 0.5rem 0;
+    margin-top: 4px;
+    overflow: hidden;
+    z-index: 9999 !important;
+}
+
+#servidoresTable .dropdown-menu.show {
+    animation: tableDropdownFadeIn 0.2s ease-out;
+    z-index: 10000 !important;
+}
+
+/* REMOVIDO: Estilos movidos para .table-dropdown-item (linha ~1332) */
+
+/* Garantir que o dropdown sempre apareça sobre o card */
+#servidoresTable .dropdown {
+    position: relative;
+}
+
+/* Espaçamento otimizado das células */
+#servidoresTable tbody td {
+    padding: 1.25rem 0.75rem;
+    vertical-align: middle;
+}
+
+/* Bordas suaves na tabela */
+#servidoresTable {
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+/* ===== ESTILOS COMPARTILHADOS PARA TABELAS DE CADASTRO ===== */
+
+/* Aplicativos, Dispositivos, Planos e Formas de Pagamento */
+#aplicativosTable tbody tr,
+#dispositivosTable tbody tr,
+#planosTable tbody tr,
+#formasPgtoTable tbody tr {
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#aplicativosTable tbody tr:hover,
+#dispositivosTable tbody tr:hover,
+#planosTable tbody tr:hover,
+#formasPgtoTable tbody tr:hover {
+    background-color: rgba(98, 75, 255, 0.03);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* Animação no nome ao hover */
+#aplicativosTable tbody tr:hover .text-dark,
+#dispositivosTable tbody tr:hover .text-dark,
+#planosTable tbody tr:hover .text-dark,
+#formasPgtoTable tbody tr:hover .text-dark {
+    color: #624BFF !important;
+}
+
+/* Efeito hover nos ícones circulares */
+#aplicativosTable tbody .flex-shrink-0 > div,
+#dispositivosTable tbody .flex-shrink-0 > div,
+#planosTable tbody .flex-shrink-0 > div,
+#formasPgtoTable tbody .flex-shrink-0 > div {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#aplicativosTable tbody tr:hover .flex-shrink-0 > div,
+#dispositivosTable tbody tr:hover .flex-shrink-0 > div,
+#planosTable tbody tr:hover .flex-shrink-0 > div,
+#formasPgtoTable tbody tr:hover .flex-shrink-0 > div {
+    transform: scale(1.08);
+    box-shadow: 0 4px 12px rgba(98, 75, 255, 0.2);
+}
+
+/* Botão de ações */
+#aplicativosTable tbody .dropdown button,
+#dispositivosTable tbody .dropdown button,
+#planosTable tbody .dropdown button,
+#formasPgtoTable tbody .dropdown button,
+#servidoresTable tbody .dropdown button {
+    transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Menu dropdown - estilo premium */
+#aplicativosTable .dropdown-menu,
+#dispositivosTable .dropdown-menu,
+#planosTable .dropdown-menu,
+#formasPgtoTable .dropdown-menu {
+    min-width: 220px;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+    padding: 0.5rem 0;
+    margin-top: 4px;
+    overflow: hidden;
+    z-index: 9999 !important;
+}
+
+#aplicativosTable .dropdown-menu.show,
+#dispositivosTable .dropdown-menu.show,
+#planosTable .dropdown-menu.show,
+#formasPgtoTable .dropdown-menu.show {
+    animation: tableDropdownFadeIn 0.2s ease-out;
+    z-index: 10000 !important;
+}
+
+/* REMOVIDO: Estilos movidos para .table-dropdown-item (linha ~1332) */
+
+/* Posicionamento do dropdown */
+#aplicativosTable .dropdown,
+#dispositivosTable .dropdown,
+#planosTable .dropdown,
+#formasPgtoTable .dropdown {
+    position: relative;
+}
+
+/* Espaçamento das células */
+#aplicativosTable tbody td,
+#dispositivosTable tbody td,
+#planosTable tbody td,
+#formasPgtoTable tbody td {
+    padding: 1.25rem 0.75rem;
+    vertical-align: middle;
+}
+
+/* Bordas suaves */
+#aplicativosTable,
+#dispositivosTable,
+#planosTable,
+#formasPgtoTable {
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+/* ===== ESTILOS ESPECÍFICOS DA TABELA DE PLANOS ===== */
+
+/* Badge de telas com hover */
+#planosTable tbody .badge {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#planosTable tbody tr:hover .badge {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(13, 110, 253, 0.3);
+}
+
+/* ===== NAVBAR VERTICAL - REMOVER SCROLLS ===== */
+
+.navbar-vertical .nav-scroller {
+    overflow-y: visible !important;
+    overflow-x: visible !important;
+}
+
+.navbar-vertical .slimScrollDiv {
+    overflow-y: visible !important;
+    overflow-x: visible !important;
+}
+
+/* ===== ESTILOS DOS FORMULÁRIOS DE CADASTRO ===== */
+
+/* Card principal dos formulários */
+.cadastro-form-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    border-radius: 0.75rem !important;
+}
+
+.cadastro-form-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 24px rgba(98, 75, 255, 0.15) !important;
+}
+
+/* Inputs e selects com foco aprimorado */
+.cadastro-form-card .form-control:focus,
+.cadastro-form-card .form-select:focus {
+    border-color: #624BFF;
+    box-shadow: 0 0 0 0.25rem rgba(98, 75, 255, 0.15);
+}
+
+.cadastro-form-card .form-control,
+.cadastro-form-card .form-select {
+    border-radius: 0.5rem;
+    border: 2px solid #e9ecef;
+    transition: all 0.2s ease;
+}
+
+.cadastro-form-card .form-control:hover,
+.cadastro-form-card .form-select:hover {
+    border-color: #c5c9d0;
+}
+
+/* Labels com ícones */
+.cadastro-form-card .form-label {
+    margin-bottom: 0.75rem;
+    font-size: 0.9375rem;
+}
+
+.cadastro-form-card .form-label i {
+    font-size: 1.1rem;
+}
+
+/* Input group (para campos com R$) */
+.cadastro-form-card .input-group-text {
+    background-color: #f8f9fa;
+    border: 2px solid #e9ecef;
+    border-right: none;
+    font-weight: 600;
+    color: #28a745;
+}
+
+.cadastro-form-card .input-group .form-control {
+    border-left: none;
+}
+
+.cadastro-form-card .input-group:focus-within .input-group-text {
+    border-color: #624BFF;
+    background-color: rgba(98, 75, 255, 0.05);
+}
+
+.cadastro-form-card .input-group:focus-within .form-control {
+    border-color: #624BFF;
+}
+
+/* Botão de submit aprimorado */
+.cadastro-form-card .btn-primary {
+    background: linear-gradient(135deg, #624BFF 0%, #7C3AED 100%);
+    border: none;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(98, 75, 255, 0.3);
+}
+
+.cadastro-form-card .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(98, 75, 255, 0.4);
+    background: linear-gradient(135deg, #7C3AED 0%, #624BFF 100%);
+}
+
+.cadastro-form-card .btn-primary:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(98, 75, 255, 0.3);
+}
+
+/* Badge "Opcional" */
+.cadastro-form-card .badge.bg-light {
+    font-size: 0.75rem;
+    padding: 0.35rem 0.65rem;
+    font-weight: 500;
+    border: 1px solid #dee2e6;
+}
+
+/* Textos de ajuda (small) */
+.cadastro-form-card small.text-muted {
+    font-size: 0.8125rem;
+    display: block;
+    margin-top: 0.5rem;
+}
+
+/* Header do formulário */
+.cadastro-form-card .border-bottom {
+    border-color: #e9ecef !important;
+}
+
+.cadastro-form-card h4 i {
+    font-size: 1.3rem;
+}
+
+/* Animação suave ao carregar */
+.cadastro-form-card {
+    animation: fadeInUp 0.5s ease;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Placeholders estilizados */
+.cadastro-form-card .form-control::placeholder,
+.cadastro-form-card .form-select::placeholder {
+    color: #adb5bd;
+    font-style: italic;
+}
+
+/* Inputs com erro (quando required não preenchido) */
+.cadastro-form-card .form-control:invalid:not(:placeholder-shown),
+.cadastro-form-card .form-select:invalid:not(:placeholder-shown) {
+    border-color: #dc3545;
+}
+
+.cadastro-form-card .form-control:valid:not(:placeholder-shown),
+.cadastro-form-card .form-select:valid:not(:placeholder-shown) {
+    border-color: #28a745;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .cadastro-form-card {
+        margin-top: 1.5rem;
+    }
+
+    .cadastro-form-card .btn-lg {
+        font-size: 1rem;
+    }
+}
+
+/* ===== CLASSES ESPECÍFICAS PARA DROPDOWNS DE TABELAS ===== */
+/* Inspirada no estilo premium do header.html */
+/* Sobrescreve TODOS os estilos com !important e especificidade máxima */
+
+/* Base comum para todos os dropdown-items de tabelas */
+.dropdown-item.dropdown-action-view,
+.dropdown-item.dropdown-action-edit,
+.dropdown-item.dropdown-action-payment,
+.dropdown-item.dropdown-action-delete,
+button.dropdown-item.dropdown-action-view,
+button.dropdown-item.dropdown-action-edit,
+button.dropdown-item.dropdown-action-payment,
+button.dropdown-item.dropdown-action-delete {
+    padding: 0.75rem 1.5rem !important;
+    display: flex !important;
+    align-items: center !important;
+    width: 100% !important;
+    border: none !important;
+    background-color: transparent !important;
+    background: transparent !important;
+    text-align: left !important;
+    font-size: 0.9375rem !important;
+    color: #334155 !important;
+    transition: all 0.2s ease !important;
+    position: relative !important;
+    cursor: pointer !important;
+    line-height: 1.5 !important;
+    text-decoration: none !important;
+    border-radius: 0 !important;
+}
+
+/* ===== AÇÃO: VER INFORMAÇÕES (Roxo) ===== */
+.dropdown-item.dropdown-action-view::before,
+button.dropdown-item.dropdown-action-view::before {
+    content: '' !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 3px !important;
+    background: #624bff !important;
+    transform: scaleY(0) !important;
+    transition: transform 0.2s ease !important;
+}
+
+.dropdown-item.dropdown-action-view:hover,
+.dropdown-item.dropdown-action-view:focus,
+.dropdown-item.dropdown-action-view:active,
+button.dropdown-item.dropdown-action-view:hover,
+button.dropdown-item.dropdown-action-view:focus,
+button.dropdown-item.dropdown-action-view:active {
+    background-color: #f1f5f9 !important;
+    background: #f1f5f9 !important;
+    color: #624bff !important;
+    padding-left: 1.75rem !important;
+    text-decoration: none !important;
+}
+
+.dropdown-item.dropdown-action-view:hover::before,
+.dropdown-item.dropdown-action-view:focus::before,
+button.dropdown-item.dropdown-action-view:hover::before,
+button.dropdown-item.dropdown-action-view:focus::before {
+    transform: scaleY(1) !important;
+}
+
+.dropdown-item.dropdown-action-view i,
+button.dropdown-item.dropdown-action-view i {
+    transition: all 0.2s ease !important;
+    opacity: 0.7 !important;
+    color: #475569 !important;
+}
+
+.dropdown-item.dropdown-action-view:hover i,
+.dropdown-item.dropdown-action-view:focus i,
+button.dropdown-item.dropdown-action-view:hover i,
+button.dropdown-item.dropdown-action-view:focus i {
+    opacity: 1 !important;
+    color: #624bff !important;
+}
+
+/* ===== AÇÃO: EDITAR INFORMAÇÕES (Roxo) ===== */
+.dropdown-item.dropdown-action-edit::before,
+button.dropdown-item.dropdown-action-edit::before {
+    content: '' !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 3px !important;
+    background: #624bff !important;
+    transform: scaleY(0) !important;
+    transition: transform 0.2s ease !important;
+}
+
+.dropdown-item.dropdown-action-edit:hover,
+.dropdown-item.dropdown-action-edit:focus,
+.dropdown-item.dropdown-action-edit:active,
+button.dropdown-item.dropdown-action-edit:hover,
+button.dropdown-item.dropdown-action-edit:focus,
+button.dropdown-item.dropdown-action-edit:active {
+    background-color: #f1f5f9 !important;
+    background: #f1f5f9 !important;
+    color: #624bff !important;
+    padding-left: 1.75rem !important;
+    text-decoration: none !important;
+}
+
+.dropdown-item.dropdown-action-edit:hover::before,
+.dropdown-item.dropdown-action-edit:focus::before,
+button.dropdown-item.dropdown-action-edit:hover::before,
+button.dropdown-item.dropdown-action-edit:focus::before {
+    transform: scaleY(1) !important;
+}
+
+.dropdown-item.dropdown-action-edit i,
+button.dropdown-item.dropdown-action-edit i {
+    transition: all 0.2s ease !important;
+    opacity: 0.7 !important;
+    color: #475569 !important;
+}
+
+.dropdown-item.dropdown-action-edit:hover i,
+.dropdown-item.dropdown-action-edit:focus i,
+button.dropdown-item.dropdown-action-edit:hover i,
+button.dropdown-item.dropdown-action-edit:focus i {
+    opacity: 1 !important;
+    color: #624bff !important;
+}
+
+/* ===== AÇÃO: REGISTRAR PAGAMENTO (Verde) ===== */
+.dropdown-item.dropdown-action-payment::before,
+button.dropdown-item.dropdown-action-payment::before {
+    content: '' !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 3px !important;
+    background: #16a34a !important;
+    transform: scaleY(0) !important;
+    transition: transform 0.2s ease !important;
+}
+
+.dropdown-item.dropdown-action-payment:hover,
+.dropdown-item.dropdown-action-payment:focus,
+.dropdown-item.dropdown-action-payment:active,
+button.dropdown-item.dropdown-action-payment:hover,
+button.dropdown-item.dropdown-action-payment:focus,
+button.dropdown-item.dropdown-action-payment:active {
+    background-color: #f1f5f9 !important;
+    background: #f1f5f9 !important;
+    color: #16a34a !important;
+    padding-left: 1.75rem !important;
+    text-decoration: none !important;
+}
+
+.dropdown-item.dropdown-action-payment:hover::before,
+.dropdown-item.dropdown-action-payment:focus::before,
+button.dropdown-item.dropdown-action-payment:hover::before,
+button.dropdown-item.dropdown-action-payment:focus::before {
+    transform: scaleY(1) !important;
+}
+
+.dropdown-item.dropdown-action-payment i,
+button.dropdown-item.dropdown-action-payment i {
+    transition: all 0.2s ease !important;
+    opacity: 0.7 !important;
+    color: #475569 !important;
+}
+
+.dropdown-item.dropdown-action-payment:hover i,
+.dropdown-item.dropdown-action-payment:focus i,
+button.dropdown-item.dropdown-action-payment:hover i,
+button.dropdown-item.dropdown-action-payment:focus i {
+    opacity: 1 !important;
+    color: #16a34a !important;
+}
+
+/* ===== AÇÃO: CANCELAR/DELETAR (Vermelho) ===== */
+.dropdown-item.dropdown-action-delete::before,
+button.dropdown-item.dropdown-action-delete::before {
+    content: '' !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 3px !important;
+    background: #dc3545 !important;
+    transform: scaleY(0) !important;
+    transition: transform 0.2s ease !important;
+}
+
+.dropdown-item.dropdown-action-delete:hover,
+.dropdown-item.dropdown-action-delete:focus,
+.dropdown-item.dropdown-action-delete:active,
+button.dropdown-item.dropdown-action-delete:hover,
+button.dropdown-item.dropdown-action-delete:focus,
+button.dropdown-item.dropdown-action-delete:active {
+    background-color: #fff5f5 !important;
+    background: #fff5f5 !important;
+    color: #b91c1c !important;
+    padding-left: 1.75rem !important;
+    text-decoration: none !important;
+}
+
+.dropdown-item.dropdown-action-delete:hover::before,
+.dropdown-item.dropdown-action-delete:focus::before,
+button.dropdown-item.dropdown-action-delete:hover::before,
+button.dropdown-item.dropdown-action-delete:focus::before {
+    transform: scaleY(1) !important;
+}
+
+.dropdown-item.dropdown-action-delete,
+button.dropdown-item.dropdown-action-delete {
+    color: #dc3545 !important;
+}
+
+.dropdown-item.dropdown-action-delete i,
+button.dropdown-item.dropdown-action-delete i {
+    transition: all 0.2s ease !important;
+    opacity: 0.7 !important;
+    color: #dc3545 !important;
+}
+
+.dropdown-item.dropdown-action-delete:hover i,
+.dropdown-item.dropdown-action-delete:focus i,
+button.dropdown-item.dropdown-action-delete:hover i,
+button.dropdown-item.dropdown-action-delete:focus i {
+    opacity: 1 !important;
+    color: #b91c1c !important;
+}
+
+/* ========== Gestão DNS - Cards Filtráveis ========== */
+.card-filter-clickable {
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.card-filter-clickable:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+.card-filter-clickable.card-filter-active {
+    border: 3px solid #0d6efd !important;
+    box-shadow: 0 6px 16px rgba(13, 110, 253, 0.4) !important;
+    transform: translateY(-5px);
+}
+
+.card-filter-clickable.card-filter-active::after {
+    content: '\f0b0';  /* Font Awesome filter icon */
+    font-family: 'bootstrap-icons';
+    position: absolute;
+    top: 5px;
+    right: 8px;
+    font-size: 0.9rem;
+    color: #0d6efd;
+    font-weight: bold;
+}
+
+/* ========================================================================== */
+/* ESTILOS PARA MODAL DE EDIÇÃO DE CLIENTE - CONTAS DE APLICATIVOS           */
+/* ========================================================================== */
+
+/* Badge de Conta Principal com animação sutil */
+.badge.bg-warning.text-dark {
+    animation: badgePulse 2s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 4px rgba(255, 193, 7, 0);
+    }
+}
+
+/* Estilo para switch de conta principal */
+.conta-principal-checkbox {
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.conta-principal-checkbox:checked {
+    background-color: #ffc107 !important;
+    border-color: #ffc107 !important;
+}
+
+.conta-principal-checkbox:focus {
+    box-shadow: 0 0 0 0.25rem rgba(255, 193, 7, 0.25);
+}
+
+/* Card de conta de aplicativo - bordas coloridas */
+.card.shadow-sm[style*="border-left: 4px solid #ffc107"] {
+    background: linear-gradient(to right, #fff9e6 0%, #ffffff 5%);
+}
+
+/* Hover effect nos cards de contas */
+#edit-contas-apps-container .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+    transition: all 0.3s ease;
+}
+
+/* Estilo para modal XL (mais largo) */
+.modal-xl {
+    max-width: 1140px;
+}
+
+/* Scroll suave no modal body */
+.modal-body {
+    scroll-behavior: smooth;
+}
+
+/* Badge de contador de contas */
+#edit-contas-count-badge {
+    font-size: 0.875rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 0.375rem;
+    font-weight: 600;
+}
+
+/* Destaque visual para campos obrigatórios nos cards */
+.card-body label .text-danger {
+    font-size: 1.1em;
+}
+
+/* Estilo para mensagem "Carregando contas" */
+.spinner-border {
+    width: 2rem;
+    height: 2rem;
+}
+
+/* Overlay de loading para modais */
+.modal-loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1060;
+    border-radius: inherit;
+}
+
+.modal-loading-overlay .loading-content {
+    text-align: center;
+}
+
+.modal-loading-overlay .spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Animação suave para aparecer os cards */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+#edit-contas-apps-container .card {
+    animation: fadeInUp 0.4s ease-out;
+    animation-fill-mode: both;
+}
+
+#edit-contas-apps-container .card:nth-child(1) {
+    animation-delay: 0.1s;
+}
+
+#edit-contas-apps-container .card:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+#edit-contas-apps-container .card:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+/* Melhoria visual do toggle "Não enviar mensagens" */
+.form-check-input[style*="width: 3rem"] {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='rgba%280, 0, 0, 0.25%29'/%3e%3c/svg%3e");
+}
+
+.form-check-input[style*="width: 3rem"]:checked {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+}
+
+/* Responsividade para tablets */
+@media (max-width: 992px) {
+    .modal-xl {
+        max-width: 90%;
+    }
+}
+
+/* ========================================
+   EFEITO DE BOLINHAS ONDULARES PARA LOADING
+   ======================================== */
+.loading-dots {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.loading-dots span {
+    width: 8px;
+    height: 8px;
+    background-color: currentColor;
+    border-radius: 50%;
+    animation: wave 1.2s ease-in-out infinite;
+}
+
+.loading-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes wave {
+    0%, 60%, 100% {
+        transform: translateY(0);
+    }
+    30% {
+        transform: translateY(-8px);
+    }
+}
+
+/* Classe para botões com loading - garante altura fixa */
+.btn-loading-ready {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-lg.btn-loading-ready {
+    min-height: 48px;
+}

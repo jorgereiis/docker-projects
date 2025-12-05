@@ -19,6 +19,7 @@ media
 *.sql
 *.md
 nossopainel-django/mediafiles
+.session
 
 # Claude AI
 .claude

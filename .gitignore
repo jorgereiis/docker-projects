@@ -18,7 +18,8 @@ db.sqlite3-journal
 media
 *.sql
 *.md
-nossopainel-django/mediafiles
+*/nossopainel-django/mediafiles
+*/nossopainel-django/staticfiles
 .session
 
 # Claude AI

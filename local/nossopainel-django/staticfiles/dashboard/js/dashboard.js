@@ -1044,10 +1044,18 @@ function adicionarEventListenersContas() {
                     setButtonLoading(btn, false, originalHTML);
                     $loading.fadeOut(200);
 
+                    // Tenta extrair mensagem específica da resposta
+                    let errorMessage = 'Erro ao editar cliente!';
+                    if (xhr.responseJSON) {
+                        errorMessage = xhr.responseJSON.error_message_edit
+                                    || xhr.responseJSON.error_message
+                                    || errorMessage;
+                    }
+
                     fireAlert({
                         icon: 'error',
                         title: 'Oops...',
-                        text: 'Erro ao editar cliente!'
+                        html: errorMessage
                     });
                 }
             });

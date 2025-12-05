@@ -36,7 +36,6 @@ services:
     ports:
        - "8001:8001"
     environment:
-      - DEBUG=False
       - TZ=America/Bahia
       # Configuração MySQL
       - DB_HOST=nossopainel-mysql

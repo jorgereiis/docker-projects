@@ -1,1780 +1,1127 @@
-import os
-import sys
-import json
-import django
-import calendar
-import requests
-import subprocess
-import threading
-from pathlib import Path
-from django.db.models import Q
-from django.utils import timezone
-from urllib3.util.retry import Retry
-from datetime import datetime, timedelta
-from requests.adapters import HTTPAdapter
-import base64, mimetypes, re, time, random
-from django.db import transaction, IntegrityError
-import logging
+#!/bin/bash
+# =============================================================================
+# Monitor WPPCONNECT - Verifica sessões e faz restart/rebuild se necessário
+# Localização no servidor: /Docker/ubuntu/monitor_wppconnect.sh
+#
+# Lógica de verificação:
+# 1. Container não UP → docker restart (solução rápida)
+# 2. API não retorna 200 → docker restart (solução rápida)
+# 3. Divergência status-session vs check-connection → rebuild completo
+#    (detecta problema de detached frame no Puppeteer)
+#
+# Obtenção de tokens:
+# - Os tokens das sessões são obtidos do banco SQLite do Django
+# - Tabela: cadastros_sessaowpp (campos: usuario, token, is_active)
+# - Configure DB_PATH abaixo com o caminho correto do banco
+#
+# Pré-requisitos:
+# - sqlite3 instalado (apt-get install sqlite3)
+# - Acesso de leitura ao banco de dados Django
+#
+# Uso:
+#   chmod +x /Docker/ubuntu/monitor_wppconnect.sh
+#   Adicionar ao crontab: */10 * * * * /Docker/ubuntu/monitor_wppconnect.sh
+# =============================================================================
 
-# Adiciona o caminho para imports do novo sistema de logging
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Importa configuração centralizada de logging
-from cadastros.services.logging_config import get_logger
-from scripts.logging_utils import (
-    registrar_log_json_auditoria,
-    log_envio_mensagem,
+# =============================================================================
+# CONFIGURAÇÃO DE LOGS DUAL
+# =============================================================================
+# DEBUG_LOG: Log detalhado com todas as operações, respostas da API, etc.
+# MONITOR_LOG: Log estruturado com resumo executivo de cada ciclo
+# INCIDENT_LOG: Log de incidentes graves (502, restart, rebuild)
+DEBUG_LOG="${SCRIPT_DIR}/logs/wppconnect_debug.log"
+MONITOR_LOG="${SCRIPT_DIR}/logs/wppconnect_monitor.log"
+INCIDENT_LOG="${SCRIPT_DIR}/logs/wppconnect_incidents.log"
+
+# Arquivos de controle
+DIVERGENCE_FILE="/tmp/wppconnect_divergence_count"
+CYCLE_COUNT_FILE="/tmp/wppconnect_cycle_count"
+
+# Configurações da API
+API_URL="http://api.nossopainel.com.br/api"
+DIVERGENCE_THRESHOLD=3  # Divergências consecutivas antes de rebuild
+
+# Caminho do banco de dados SQLite do Django (onde os tokens estão armazenados)
+DB_PATH="${SCRIPT_DIR}/nossopainel-django/database/db.sqlite3"
+
+# =============================================================================
+# ARRAYS PARA RASTREAMENTO DE SESSÕES
+# =============================================================================
+declare -a SESSIONS_CONNECTED=()
+declare -a SESSIONS_DISCONNECTED=()
+declare -a SESSIONS_DIVERGENT=()
+declare -a SESSIONS_ERROR=()
+
+# =============================================================================
+# FLAGS DE ESTADO DO CICLO
+# =============================================================================
+FLAG_CONTAINER_RESTARTED=false
+FLAG_CONTAINER_REBUILT=false
+FLAG_API_ERROR=false
+FLAG_CLOUDFLARE_ERROR=false
+FLAG_INTERNAL_ERROR=false
+CONTAINER_STATUS_TEXT="UNKNOWN"
+API_STATUS_TEXT="UNKNOWN"
+
+# Criar diretório de logs se não existir
+mkdir -p "${SCRIPT_DIR}/logs"
+
+# =============================================================================
+# FUNÇÕES DE LOGGING DUAL
+# =============================================================================
+
+# Log apenas para debug (detalhado)
+log_debug() {
+    local message="$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $message" >> "$DEBUG_LOG"
+}
+
+# Log apenas para monitor (resumo estruturado)
+log_monitor() {
+    local message="$1"
+    echo "$message" >> "$MONITOR_LOG"
+}
+
+# Log para ambos os arquivos
+log_both() {
+    local level="$1"
+    local message="$2"
+    local formatted="[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message"
+    echo "$formatted" >> "$DEBUG_LOG"
+    # Para o monitor, logar apenas se for INFO, WARN ou ERROR
+    if [[ "$level" != "DEBUG" ]]; then
+        echo "$formatted" >> "$MONITOR_LOG"
+    fi
+}
+
+# Função legada para compatibilidade (redireciona para debug)
+log() {
+    log_debug "$1"
+}
+
+# Função para separador visual no log de debug
+log_separator() {
+    echo "============================================================" >> "$DEBUG_LOG"
+}
+
+# Função para registrar incidentes graves
+log_incident() {
+    local type="$1"
+    local details="$2"
+    {
+        echo "================================================================================"
+        echo "INCIDENTE: $type"
+        echo "DATA/HORA: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "CICLO: #$CYCLE_NUMBER"
+        echo ""
+        echo "DETALHES:"
+        echo "$details"
+        echo "================================================================================"
+        echo ""
+    } >> "$INCIDENT_LOG"
+}
+
+# Função para capturar diagnóstico completo quando ocorre erro grave
+capture_diagnostic_info() {
+    local ERROR_TYPE="$1"       # "502", "500", etc.
+    local API_RESPONSE="$2"     # Corpo da resposta HTTP
+    local API_HEADERS="$3"      # Headers da resposta HTTP
+    local TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+    local DIAG_FILE="${SCRIPT_DIR}/logs/diagnostic_${TIMESTAMP}.log"
+
+    log_debug "[DIAGNOSTIC] Capturando informações de diagnóstico..."
+    log_debug "[DIAGNOSTIC] Arquivo: $DIAG_FILE"
+
+    {
+        echo "================================================================================"
+        echo "DIAGNÓSTICO DE ERRO - $ERROR_TYPE"
+        echo "================================================================================"
+        echo ""
+        echo "DATA/HORA: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "CICLO: #$CYCLE_NUMBER"
+        echo ""
+        echo "================================================================================"
+        echo "1. RESPOSTA HTTP"
+        echo "================================================================================"
+        echo ""
+        echo "Código HTTP: $ERROR_TYPE"
+        echo ""
+        echo "--- HEADERS ---"
+        echo "$API_HEADERS"
+        echo ""
+        echo "--- CORPO DA RESPOSTA ---"
+        echo "$API_RESPONSE"
+        echo ""
+        echo "================================================================================"
+        echo "2. ANÁLISE DA RESPOSTA"
+        echo "================================================================================"
+        echo ""
+
+        # Detectar origem do erro baseado no corpo/headers
+        if echo "$API_HEADERS$API_RESPONSE" | grep -qiE "(cf-ray|cloudflare|__cf_)"; then
+            echo "ORIGEM DETECTADA: CLOUDFLARE"
+            echo "O erro 502 está vindo do Cloudflare (proxy reverso)"
+            echo "Possíveis causas:"
+            echo "  - Backend (container) não está respondendo"
+            echo "  - Timeout de conexão com o backend"
+            echo "  - Limite de requisições atingido"
+        elif echo "$API_HEADERS$API_RESPONSE" | grep -qiE "(nginx|upstream)"; then
+            echo "ORIGEM DETECTADA: NGINX"
+            echo "O erro 502 está vindo do nginx (upstream timeout)"
+            echo "Possíveis causas:"
+            echo "  - Container WPPCONNECT não está respondendo"
+            echo "  - Upstream timeout configurado muito baixo"
+        else
+            echo "ORIGEM DETECTADA: DESCONHECIDA/CONTAINER"
+            echo "O erro pode estar vindo diretamente do container"
+        fi
+        echo ""
+        echo "================================================================================"
+        echo "3. LOGS DO CONTAINER (últimas 200 linhas)"
+        echo "================================================================================"
+        echo ""
+        docker logs --tail 200 wppconnect-server 2>&1
+        echo ""
+        echo "================================================================================"
+        echo "4. MÉTRICAS DO CONTAINER"
+        echo "================================================================================"
+        echo ""
+        echo "--- docker stats ---"
+        docker stats --no-stream wppconnect-server 2>&1
+        echo ""
+        echo "--- docker inspect (Estado) ---"
+        docker inspect --format='{{json .State}}' wppconnect-server 2>&1 | python3 -m json.tool 2>/dev/null || docker inspect --format='{{json .State}}' wppconnect-server 2>&1
+        echo ""
+        echo "================================================================================"
+        echo "5. RECURSOS DO HOST"
+        echo "================================================================================"
+        echo ""
+        echo "--- Memória (free -m) ---"
+        free -m 2>&1
+        echo ""
+        echo "--- Uso de disco (df -h) ---"
+        df -h 2>&1 | head -10
+        echo ""
+        echo "--- Processos com maior uso de memória ---"
+        ps aux --sort=-%mem 2>&1 | head -10
+        echo ""
+        echo "================================================================================"
+        echo "6. CONTAINERS DOCKER"
+        echo "================================================================================"
+        echo ""
+        docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1
+        echo ""
+        echo "================================================================================"
+        echo "FIM DO DIAGNÓSTICO"
+        echo "================================================================================"
+    } > "$DIAG_FILE"
+
+    log_debug "[DIAGNOSTIC] Diagnóstico salvo em: $DIAG_FILE"
+
+    # Registrar incidente no log de incidentes
+    log_incident "ERRO HTTP $ERROR_TYPE" "Diagnóstico completo salvo em: $DIAG_FILE
+Origem provável: $(echo "$API_HEADERS$API_RESPONSE" | grep -qiE "(cf-ray|cloudflare)" && echo "CLOUDFLARE" || (echo "$API_HEADERS$API_RESPONSE" | grep -qiE "nginx|upstream" && echo "NGINX" || echo "CONTAINER/DESCONHECIDO"))"
+}
+
+# =============================================================================
+# FUNÇÕES AUXILIARES
+# =============================================================================
+
+# Converter boolean para texto SIM/NÃO
+bool_to_text() {
+    if [[ "$1" == "true" ]]; then
+        echo "SIM"
+    else
+        echo "NÃO"
+    fi
+}
+
+# Obter número do ciclo atual
+get_cycle_number() {
+    local cycle=$(cat "$CYCLE_COUNT_FILE" 2>/dev/null || echo "0")
+    cycle=$((cycle + 1))
+    echo "$cycle" > "$CYCLE_COUNT_FILE"
+    echo "$cycle"
+}
+
+# Reset do estado do ciclo
+reset_cycle_state() {
+    SESSIONS_CONNECTED=()
+    SESSIONS_DISCONNECTED=()
+    SESSIONS_DIVERGENT=()
+    SESSIONS_ERROR=()
+    FLAG_CONTAINER_RESTARTED=false
+    FLAG_CONTAINER_REBUILT=false
+    FLAG_API_ERROR=false
+    FLAG_CLOUDFLARE_ERROR=false
+    FLAG_INTERNAL_ERROR=false
+    CONTAINER_STATUS_TEXT="UNKNOWN"
+    API_STATUS_TEXT="UNKNOWN"
+}
+
+# Detectar se erro é relacionado ao Cloudflare
+is_cloudflare_error() {
+    local response="$1"
+    local status_code="$2"
+
+    # HTTP 520-527 são erros específicos Cloudflare
+    if [[ "$status_code" =~ ^5[2][0-7]$ ]]; then
+        return 0
+    fi
+
+    # Verificar ray-id ou classes cf- no HTML/resposta
+    if echo "$response" | grep -qiE "(cf-ray|cloudflare|__cf_|cf-browser-verification|cf-error)"; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Detectar se erro é interno da API/container
+is_internal_error() {
+    local response="$1"
+    local status_code="$2"
+
+    # HTTP 500-519 são erros internos do servidor
+    if [[ "$status_code" =~ ^5[01][0-9]$ ]]; then
+        return 0
+    fi
+
+    # Verificar mensagens de erro comuns
+    if echo "$response" | grep -qiE "(internal server error|exception|traceback|puppeteer|detached frame)"; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Obter status final do ciclo
+get_final_status() {
+    local divergent_count=${#SESSIONS_DIVERGENT[@]}
+    local disconnected_count=${#SESSIONS_DISCONNECTED[@]}
+    local error_count=${#SESSIONS_ERROR[@]}
+
+    if [[ "$FLAG_CONTAINER_REBUILT" == "true" ]]; then
+        echo "REBUILD EXECUTADO"
+    elif [[ "$FLAG_CONTAINER_RESTARTED" == "true" ]]; then
+        echo "RESTART EXECUTADO"
+    elif [[ "$FLAG_API_ERROR" == "true" ]]; then
+        echo "ERRO NA API"
+    elif [[ $divergent_count -gt 0 ]]; then
+        echo "DIVERGÊNCIAS DETECTADAS ($divergent_count)"
+    elif [[ $error_count -gt 0 ]]; then
+        echo "ERROS EM SESSÕES ($error_count)"
+    elif [[ $disconnected_count -gt 0 ]]; then
+        echo "OK - Com sessões desconectadas ($disconnected_count)"
+    else
+        echo "OK"
+    fi
+}
+
+# Escrever resultado estruturado no log de monitoramento
+write_monitor_result() {
+    local cycle_number="$1"
+    local total_sessions=$((${#SESSIONS_CONNECTED[@]} + ${#SESSIONS_DISCONNECTED[@]} + ${#SESSIONS_DIVERGENT[@]} + ${#SESSIONS_ERROR[@]}))
+
+    # Formatar listas de sessões
+    local connected_list="${SESSIONS_CONNECTED[*]:-nenhuma}"
+    local disconnected_list="${SESSIONS_DISCONNECTED[*]:-nenhuma}"
+    local divergent_list="${SESSIONS_DIVERGENT[*]:-nenhuma}"
+    local error_list="${SESSIONS_ERROR[*]:-nenhuma}"
+
+    # Construir bloco de resultado estruturado
+    {
+        echo "================================================================================"
+        echo "CICLO DE MONITORAMENTO #$cycle_number"
+        echo "================================================================================"
+        echo ""
+        echo "DATA/HORA: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo ""
+        echo "CONTAINER"
+        echo "├─ Status: $CONTAINER_STATUS_TEXT"
+        echo "├─ Reiniciado: $(bool_to_text $FLAG_CONTAINER_RESTARTED)"
+        echo "└─ Reconstruído: $(bool_to_text $FLAG_CONTAINER_REBUILT)"
+        echo ""
+        echo "API"
+        echo "├─ Status: $API_STATUS_TEXT"
+        echo "├─ Erro: $(bool_to_text $FLAG_API_ERROR)"
+        echo "├─ Cloudflare: $(bool_to_text $FLAG_CLOUDFLARE_ERROR)"
+        echo "└─ Erro Interno: $(bool_to_text $FLAG_INTERNAL_ERROR)"
+        echo ""
+        echo "SESSÕES"
+        echo "├─ Total Verificadas: $total_sessions"
+        echo "├─ CONECTADAS (${#SESSIONS_CONNECTED[@]}): $connected_list"
+        echo "├─ DESCONECTADAS (${#SESSIONS_DISCONNECTED[@]}): $disconnected_list"
+        echo "├─ DIVERGENTES (${#SESSIONS_DIVERGENT[@]}): $divergent_list"
+        echo "└─ COM ERRO (${#SESSIONS_ERROR[@]}): $error_list"
+        echo ""
+        echo "RESULTADO: $(get_final_status)"
+        echo "================================================================================"
+        echo ""
+    } >> "$MONITOR_LOG"
+}
+
+# Rotação do log de debug (manter últimos 7 dias, max 100MB)
+rotate_debug_log() {
+    if [[ -f "$DEBUG_LOG" ]]; then
+        local size=$(stat -c%s "$DEBUG_LOG" 2>/dev/null || stat -f%z "$DEBUG_LOG" 2>/dev/null || echo "0")
+        if [[ $size -gt 104857600 ]]; then  # 100MB
+            local backup_name="${DEBUG_LOG}.$(date +%Y%m%d_%H%M%S)"
+            mv "$DEBUG_LOG" "$backup_name"
+            gzip "$backup_name" 2>/dev/null
+            # Limpar backups antigos (manter últimos 7 dias)
+            find "$(dirname $DEBUG_LOG)" -name "wppconnect_debug.log.*.gz" -mtime +7 -delete 2>/dev/null
+            log_debug "Log de debug rotacionado: $backup_name.gz"
+        fi
+    fi
+}
+
+# Rotação do log de monitor (manter últimos 30 dias, max 10MB)
+rotate_monitor_log() {
+    if [[ -f "$MONITOR_LOG" ]]; then
+        local size=$(stat -c%s "$MONITOR_LOG" 2>/dev/null || stat -f%z "$MONITOR_LOG" 2>/dev/null || echo "0")
+        if [[ $size -gt 10485760 ]]; then  # 10MB
+            local backup_name="${MONITOR_LOG}.$(date +%Y%m%d_%H%M%S)"
+            mv "$MONITOR_LOG" "$backup_name"
+            gzip "$backup_name" 2>/dev/null
+            # Limpar backups antigos (manter últimos 30 dias)
+            find "$(dirname $MONITOR_LOG)" -name "wppconnect_monitor.log.*.gz" -mtime +30 -delete 2>/dev/null
+            log_debug "Log de monitor rotacionado: $backup_name.gz"
+        fi
+    fi
+}
+
+# Função para enviar notificação WhatsApp após rebuild ou alerta
+# RESULTADO: "sucesso", "falha", "alerta", ou "restart"
+send_notification() {
+    local RESULTADO="$1"  # "sucesso", "falha", "alerta", ou "restart"
+    local MOTIVO="$2"     # Descrição do motivo
+    local SESSOES_PROBLEMA="$3"  # Lista de sessões que causaram o problema (opcional)
+
+    log "[NOTIFY] =========================================="
+    log "[NOTIFY] Preparando notificação WhatsApp..."
+
+    # Carregar variáveis do .env do Django
+    DJANGO_ENV="${SCRIPT_DIR}/nossopainel-django/.env"
+    if [ ! -f "$DJANGO_ENV" ]; then
+        log "[NOTIFY] ERRO: Arquivo .env do Django não encontrado: $DJANGO_ENV"
+        return 1
+    fi
+
+    # Extrair MEU_NUM_TIM e URL_API_WPP do .env
+    TELEFONE_ADMIN=$(grep -E "^MEU_NUM_TIM" "$DJANGO_ENV" | cut -d'"' -f2)
+    API_URL_WPP=$(grep -E "^URL_API_WPP" "$DJANGO_ENV" | cut -d"'" -f2)
+
+    if [ -z "$TELEFONE_ADMIN" ]; then
+        log "[NOTIFY] ERRO: MEU_NUM_TIM não encontrado no .env"
+        return 1
+    fi
+
+    log "[NOTIFY] Telefone destino: $TELEFONE_ADMIN"
+    log "[NOTIFY] API URL: $API_URL_WPP"
+
+    # Buscar sessão ativa para enviar (prioridade: jrg, depois qualquer outra)
+    local NOTIFY_SESSION=""
+    local NOTIFY_TOKEN=""
+
+    # Primeiro tenta sessão "jrg"
+    local JRG_TOKEN=$(sqlite3 "$DB_PATH" \
+        "SELECT token FROM cadastros_sessaowpp WHERE usuario = 'jrg' AND is_active = 1;" 2>/dev/null)
+
+    if [ -n "$JRG_TOKEN" ]; then
+        # Verificar se jrg está realmente conectada
+        local JRG_CHECK=$(curl -s --max-time 10 \
+            -H "Authorization: Bearer $JRG_TOKEN" \
+            "${API_URL_WPP}/jrg/check-connection-session" 2>/dev/null)
+
+        if echo "$JRG_CHECK" | grep -q '"status":true'; then
+            NOTIFY_SESSION="jrg"
+            NOTIFY_TOKEN="$JRG_TOKEN"
+            log "[NOTIFY] Usando sessão preferencial: jrg"
+        fi
+    fi
+
+    # Se jrg não está disponível, buscar qualquer sessão conectada
+    if [ -z "$NOTIFY_SESSION" ]; then
+        log "[NOTIFY] Sessão jrg não disponível, buscando alternativa..."
+
+        local SESSIONS=$(sqlite3 -separator '|' "$DB_PATH" \
+            "SELECT usuario, token FROM cadastros_sessaowpp WHERE is_active = 1;" 2>/dev/null)
+
+        while IFS='|' read -r SESS_NAME SESS_TOKEN; do
+            [ -z "$SESS_NAME" ] && continue
+
+            # Verificar se esta sessão está conectada
+            local SESS_CHECK=$(curl -s --max-time 10 \
+                -H "Authorization: Bearer $SESS_TOKEN" \
+                "${API_URL_WPP}/${SESS_NAME}/check-connection-session" 2>/dev/null)
+
+            if echo "$SESS_CHECK" | grep -q '"status":true'; then
+                NOTIFY_SESSION="$SESS_NAME"
+                NOTIFY_TOKEN="$SESS_TOKEN"
+                log "[NOTIFY] Usando sessão alternativa: $NOTIFY_SESSION"
+                break
+            fi
+        done <<< "$SESSIONS"
+    fi
+
+    # Se nenhuma sessão disponível
+    if [ -z "$NOTIFY_SESSION" ]; then
+        log "[NOTIFY] ERRO: Nenhuma sessão WhatsApp conectada para enviar notificação"
+        log "[NOTIFY] =========================================="
+        return 1
+    fi
+
+    # Montar mensagem
+    local TIMESTAMP=$(date '+%d/%m/%Y às %H:%M:%S')
+    local EMOJI STATUS_MSG TITULO
+
+    case "$RESULTADO" in
+        "sucesso")
+            EMOJI="✅"
+            STATUS_MSG="REBUILD CONCLUÍDO COM SUCESSO"
+            TITULO="MANUTENÇÃO AUTOMÁTICA"
+            ;;
+        "falha")
+            EMOJI="❌"
+            STATUS_MSG="REBUILD FALHOU"
+            TITULO="MANUTENÇÃO AUTOMÁTICA"
+            ;;
+        "alerta")
+            EMOJI="🚨"
+            STATUS_MSG="ERRO DETECTADO NA API"
+            TITULO="ALERTA DE MONITORAMENTO"
+            ;;
+        "restart")
+            EMOJI="🔄"
+            STATUS_MSG="CONTAINER REINICIADO"
+            TITULO="MANUTENÇÃO AUTOMÁTICA"
+            ;;
+        *)
+            EMOJI="ℹ️"
+            STATUS_MSG="NOTIFICAÇÃO"
+            TITULO="MONITORAMENTO"
+            ;;
+    esac
+
+    # Formatar lista de sessões com problema (se fornecida)
+    local SESSOES_FORMATADAS=""
+    local SESSOES_SECTION=""
+    if [ -n "$SESSOES_PROBLEMA" ]; then
+        SESSOES_FORMATADAS=$(echo "$SESSOES_PROBLEMA" | tr '\n' ', ' | sed 's/,$//' | sed 's/,/, /g')
+        SESSOES_SECTION="
+⚠️ *Sessões com problema:* $SESSOES_FORMATADAS"
+    fi
+
+    # Montar mensagem (usando heredoc para preservar formatação)
+    local MENSAGEM=$(cat <<EOF
+🔧 *WPPCONNECT - $TITULO*
+
+$EMOJI *$STATUS_MSG*
+
+📅 *Data/Hora:* $TIMESTAMP$SESSOES_SECTION
+
+📋 *Motivo:*
+$MOTIVO
+
+🖥️ *Sessão usada para notificação:* $NOTIFY_SESSION
+
+---
+_Mensagem automática do monitor WPPCONNECT_
+EOF
 )
 
-# Configuração do logger com rotação automática
-logger = get_logger(__name__, log_file="logs/WhatsApp/mensagens_wpp.log")
+    # Enviar mensagem via API
+    log "[NOTIFY] Enviando mensagem para $TELEFONE_ADMIN via sessão $NOTIFY_SESSION..."
 
-# Definir a variável de ambiente DJANGO_SETTINGS_MODULE
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'setup.settings')
+    # Escapar caracteres especiais para JSON
+    local MENSAGEM_JSON=$(echo "$MENSAGEM" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
 
-# Adiciona a raiz do projeto ao sys.path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    local SEND_RESP=$(curl -s --max-time 30 \
+        -X POST "${API_URL_WPP}/${NOTIFY_SESSION}/send-message" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $NOTIFY_TOKEN" \
+        -d "{\"phone\": \"$TELEFONE_ADMIN\", \"message\": \"$MENSAGEM_JSON\"}" 2>/dev/null)
 
-# Carregar as configurações do Django
-django.setup()
+    log "[NOTIFY] Resposta da API: $SEND_RESP"
 
-from django.utils import timezone
-from django.utils.timezone import localtime
-from django.contrib.auth.models import User
-from django.shortcuts import get_object_or_404
-from cadastros.utils import (
-    get_saudacao_por_hora,
-    registrar_log,
-)
-from cadastros.services.wpp import (
-    LogTemplates,
-    MessageSendConfig,
-    send_message,
-)
-from wpp.api_connection import (
-    check_number_status,
-    check_connection,
-)
-from integracoes.openai_chat import consultar_chatgpt
+    if echo "$SEND_RESP" | grep -qE '"status"\s*:\s*(true|"success")'; then
+        log "[NOTIFY] SUCESSO: Notificação enviada para $TELEFONE_ADMIN"
+        log "[NOTIFY] =========================================="
+        return 0
+    else
+        log "[NOTIFY] FALHA: Não foi possível enviar notificação"
+        log "[NOTIFY] =========================================="
+        return 1
+    fi
+}
 
-from cadastros.models import (
-    Mensalidade, SessaoWpp, MensagemEnviadaWpp,
-    Cliente, DadosBancarios, HorarioEnvios,
-    MensagensLeads, TelefoneLeads, OfertaPromocionalEnviada,
-    TarefaEnvio, HistoricoExecucaoTarefa,
-)
+# Função para reiniciar container (solução rápida)
+restart_container() {
+    log_debug "[RESTART] =========================================="
+    log_debug "[RESTART] Iniciando reinicialização do container..."
 
-URL_API_WPP = os.getenv("URL_API_WPP")
-DIR_LOGS_AGENDADOS = os.getenv("DIR_LOGS_AGENDADOS")
-DIR_LOGS_INDICACOES = os.getenv("DIR_LOGS_INDICACOES")
-TEMPLATE_LOG_MSG_SUCESSO = os.getenv("TEMPLATE_LOG_MSG_SUCESSO")
-TEMPLATE_LOG_MSG_FALHOU = os.getenv("TEMPLATE_LOG_MSG_FALHOU")
-TEMPLATE_LOG_TELEFONE_INVALIDO = os.getenv("TEMPLATE_LOG_TELEFONE_INVALIDO")
-AUDIT_LOG_PATH = Path("logs/Audit/envios_wpp.log")
+    # =========================================================================
+    # CAPTURAR LOGS E MÉTRICAS ANTES DO RESTART
+    # =========================================================================
+    log_debug "[RESTART] Capturando estado do container antes do restart..."
 
+    # Capturar últimas 200 linhas do log do container
+    log_debug "[RESTART] === LOGS DO CONTAINER (últimas 200 linhas) ==="
+    docker logs --tail 200 wppconnect-server 2>&1 | while read -r line; do
+        log_debug "[RESTART][LOG] $line"
+    done
+    log_debug "[RESTART] === FIM DOS LOGS DO CONTAINER ==="
 
-def registrar_log_auditoria(evento: dict) -> None:
-    """
-    Persiste eventos de envio em um arquivo de auditoria estruturado.
+    # Capturar métricas do container
+    log_debug "[RESTART] === MÉTRICAS DO CONTAINER ==="
+    docker stats --no-stream wppconnect-server 2>&1 | while read -r line; do
+        log_debug "[RESTART][STATS] $line"
+    done
+    log_debug "[RESTART] === FIM DAS MÉTRICAS ==="
 
-    NOTA: Esta função agora usa o sistema centralizado de logging.
-    """
-    registrar_log_json_auditoria(AUDIT_LOG_PATH, evento, auto_timestamp=True)
+    # Capturar memória do host
+    log_debug "[RESTART] === MEMÓRIA DO HOST ==="
+    free -m 2>&1 | while read -r line; do
+        log_debug "[RESTART][MEM] $line"
+    done
+    log_debug "[RESTART] === FIM DA MEMÓRIA ==="
 
+    # =========================================================================
+    # EXECUTAR RESTART
+    # =========================================================================
+    log_debug "[RESTART] Executando restart..."
+    log_debug "[RESTART] Comando: docker restart wppconnect-server"
 
-##################################################################
-######## FUNÇÃO PARA VERIFICAR SAÚDE DA SESSÃO WHATSAPP ##########
-##################################################################
+    docker restart wppconnect-server
+    RESULT=$?
 
-def verificar_saude_sessao(usuario: str, token: str) -> bool:
-    """
-    Verifica se a sessão WhatsApp está realmente ativa via check-connection.
+    if [ $RESULT -eq 0 ]; then
+        FLAG_CONTAINER_RESTARTED=true
+        log_debug "[RESTART] Container reiniciado com sucesso (exit code: 0)"
+        log_debug "[RESTART] Aguardando 30 segundos para inicialização..."
+        sleep 30
 
-    Detecta inconsistências onde status-session retorna CONNECTED mas
-    check-connection retorna Disconnected (problema de detached frame).
+        # Verificar se voltou a responder
+        API_CHECK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${API_URL}/" 2>/dev/null)
+        log_debug "[RESTART] Verificação pós-restart: API respondeu HTTP $API_CHECK"
 
-    Args:
-        usuario: Nome da sessão WPPCONNECT
-        token: Token de autenticação da sessão
+        # Qualquer resposta exceto 000 ou 5xx significa que a API está UP
+        if [ "$API_CHECK" != "000" ] && [ "$API_CHECK" -lt 500 ] 2>/dev/null; then
+            log_debug "[RESTART] Container reiniciado e API respondendo (HTTP $API_CHECK)"
+            API_STATUS_TEXT="OK (HTTP $API_CHECK) - Pós-restart"
 
-    Returns:
-        bool: True se sessão está saudável, False se com problema no WPPCONNECT.
+            # Registrar incidente de restart bem-sucedido
+            log_incident "RESTART EXECUTADO" "Container reiniciado devido a erro de API.
+API pós-restart: HTTP $API_CHECK"
+        else
+            log_debug "[RESTART] ALERTA: Container reiniciado mas API não responde (HTTP: $API_CHECK)"
+            API_STATUS_TEXT="FALHA (HTTP $API_CHECK) - Pós-restart"
 
-    Nota:
-        NÃO marca a sessão como inativa no Django. Após rebuild do container
-        WPPCONNECT, a sessão volta a funcionar automaticamente.
-    """
-    try:
-        dados, status_code = check_connection(usuario, token)
+            # Registrar incidente de restart com falha
+            log_incident "RESTART COM FALHA" "Container reiniciado mas API ainda não responde.
+API pós-restart: HTTP $API_CHECK"
+        fi
+    else
+        log_debug "[RESTART] ERRO: Falha ao reiniciar container (exit code: $RESULT)"
 
-        # API não respondeu corretamente
-        if status_code != 200:
-            logger.warning(
-                "[Health Check] Sessão %s - API não respondeu (HTTP %s) - envios cancelados para este horário",
-                usuario,
-                status_code
-            )
-            registrar_log_auditoria({
-                "funcao": "verificar_saude_sessao",
-                "status": "api_indisponivel",
-                "usuario": usuario,
-                "http_status": status_code,
-                "response": dados,
-            })
-            return False
+        # Registrar incidente de falha no restart
+        log_incident "FALHA NO RESTART" "Comando docker restart falhou com exit code: $RESULT"
+    fi
 
-        # Verifica se conexão está realmente ativa
-        # check-connection retorna {"status": true/false, "message": "Connected"/"Disconnected"}
-        connection_status = dados.get("status") if isinstance(dados, dict) else None
-        connection_message = dados.get("message", "") if isinstance(dados, dict) else ""
+    log_debug "[RESTART] =========================================="
+    return $RESULT
+}
 
-        if connection_status is False or connection_message == "Disconnected":
-            logger.warning(
-                "[Health Check] Sessão %s com problema no WPPCONNECT (status=%s, message=%s) - "
-                "envios cancelados para este horário",
-                usuario,
-                connection_status,
-                connection_message
-            )
-            registrar_log_auditoria({
-                "funcao": "verificar_saude_sessao",
-                "status": "sessao_desconectada",
-                "usuario": usuario,
-                "http_status": status_code,
-                "connection_status": connection_status,
-                "connection_message": connection_message,
-            })
-            return False
+# Função para fazer rebuild completo (problema de detached frame)
+rebuild_container() {
+    log_debug "[REBUILD] =========================================="
+    log_debug "[REBUILD] Iniciando rebuild completo do container..."
+    log_debug "[REBUILD] Motivo: Divergência detectada entre status-session e check-connection"
+    log_debug "[REBUILD] Isso geralmente indica problema de 'detached frame' no Puppeteer"
+    log_debug "[REBUILD] =========================================="
 
-        logger.debug(
-            "[Health Check] Sessão %s está saudável (status=%s, message=%s)",
-            usuario,
-            connection_status,
-            connection_message
-        )
-        return True
+    FLAG_CONTAINER_REBUILT=true
 
-    except Exception as e:
-        logger.error(
-            "[Health Check] Erro ao verificar sessão %s: %s",
-            usuario,
-            str(e),
-            exc_info=True
-        )
-        registrar_log_auditoria({
-            "funcao": "verificar_saude_sessao",
-            "status": "erro",
-            "usuario": usuario,
-            "erro": str(e),
-        })
-        # Em caso de erro, retorna False por segurança (não tenta enviar)
-        return False
+    # Detectar diretório do docker-compose automaticamente
+    COMPOSE_DIR=""
+    if [ -f "${SCRIPT_DIR}/wppconnect-build.yml" ]; then
+        COMPOSE_DIR="${SCRIPT_DIR}"
+    elif [ -f "${SCRIPT_DIR}/../wppconnect-build.yml" ]; then
+        COMPOSE_DIR="${SCRIPT_DIR}/.."
+    else
+        log_debug "[REBUILD] ERRO: Não foi possível encontrar wppconnect-build.yml"
+        log_debug "[REBUILD] Locais verificados:"
+        log_debug "[REBUILD]   - ${SCRIPT_DIR}/wppconnect-build.yml"
+        log_debug "[REBUILD]   - ${SCRIPT_DIR}/../wppconnect-build.yml"
+        return 1
+    fi
 
+    cd "$COMPOSE_DIR" || { log_debug "[REBUILD] ERRO: Não foi possível acessar $COMPOSE_DIR"; return 1; }
+    log_debug "[REBUILD] Diretório de trabalho: $(pwd)"
 
-##################################################################
-################ FUNÇÃO PARA ENVIAR MENSAGENS ####################
-##################################################################
+    # Parar container
+    log_debug "[REBUILD] Etapa 1/4: Parando container..."
+    log_debug "[REBUILD] Comando: docker stop wppconnect-server"
+    docker stop wppconnect-server 2>&1 | while read line; do log_debug "[REBUILD][STOP] $line"; done
+    log_debug "[REBUILD] Container parado"
 
-def enviar_mensagem_agendada(telefone: str, mensagem: str, usuario: str, token: str, cliente: str, tipo_envio: str) -> None:
-    """
-    Envia uma mensagem via API WPP para um número validado.
-    Registra logs de sucesso, falha e número inválido.
-    """
-    usuario_str = str(usuario)
+    # Remover container
+    log_debug "[REBUILD] Etapa 2/4: Removendo container..."
+    log_debug "[REBUILD] Comando: docker rm wppconnect-server"
+    docker rm wppconnect-server 2>&1 | while read line; do log_debug "[REBUILD][RM] $line"; done
+    log_debug "[REBUILD] Container removido"
 
-    log_writer = lambda log: registrar_log(log, usuario_str, DIR_LOGS_AGENDADOS)
-    templates = LogTemplates(
-        success=TEMPLATE_LOG_MSG_SUCESSO,
-        failure=TEMPLATE_LOG_MSG_FALHOU,
-        invalid=TEMPLATE_LOG_TELEFONE_INVALIDO,
-    )
+    # Rebuild da imagem
+    log_debug "[REBUILD] Etapa 3/4: Reconstruindo imagem..."
+    log_debug "[REBUILD] Comando: docker compose -f wppconnect-build.yml build"
+    log_debug "[REBUILD] Isso pode demorar alguns minutos..."
+    docker compose -f wppconnect-build.yml build 2>&1 | while read line; do log_debug "[REBUILD][BUILD] $line"; done
+    log_debug "[REBUILD] Build concluído"
 
-    request_payload = {
-        "phone": telefone,
-        "message": mensagem,
-        "isGroup": False,
-    }
+    # Subir container
+    log_debug "[REBUILD] Etapa 4/4: Iniciando container..."
+    log_debug "[REBUILD] Comando: docker compose -f wppconnect-build.yml up -d"
+    docker compose -f wppconnect-build.yml up -d 2>&1 | while read line; do log_debug "[REBUILD][UP] $line"; done
+    log_debug "[REBUILD] Container iniciado"
 
-    config = MessageSendConfig(
-        usuario=usuario_str,
-        token=token,
-        telefone=telefone,
-        mensagem=mensagem,
-        tipo_envio=tipo_envio,
-        cliente=cliente,
-        log_writer=log_writer,
-        log_templates=templates,
-        retry_wait=(20.0, 30.0),
-        audit_callback=registrar_log_auditoria,
-        audit_base_payload={
-            "funcao": "enviar_mensagem_agendada",
-            "payload": request_payload,
-        },
-    )
+    # Aguardar inicialização
+    log_debug "[REBUILD] Aguardando 60 segundos para inicialização completa..."
+    sleep 60
 
-    send_message(config)
-##### FIM #####
+    # Verificar se voltou
+    log_debug "[REBUILD] Verificando se API está respondendo..."
+    API_CHECK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${API_URL}/" 2>/dev/null)
+    log_debug "[REBUILD] Resposta HTTP: $API_CHECK"
 
+    # Qualquer resposta exceto 000 ou 5xx significa que a API está UP
+    if [ "$API_CHECK" != "000" ] && [ "$API_CHECK" -lt 500 ] 2>/dev/null; then
+        log_debug "[REBUILD] SUCESSO: Rebuild concluído - API respondendo (HTTP $API_CHECK)"
+        API_STATUS_TEXT="OK (HTTP $API_CHECK) - Pós-rebuild"
 
-#####################################################################
-##### FUNÇÃO PARA FILTRAR AS MENSALIDADES DOS CLIENTES A VENCER #####
-#####################################################################
+        # Aguardar mais 30s para sessões reconectarem antes de enviar notificação
+        log_debug "[REBUILD] Aguardando 30 segundos para sessões reconectarem..."
+        sleep 30
 
-def obter_mensalidades_a_vencer(usuario_query):
-    dias_envio = (
-        (1, "à vencer 1 dias"),
-        (0, "vence hoje"),
-    )
+        # Ler sessões que causaram o problema
+        local SESSOES_PROBLEMA=""
+        if [ -f /tmp/wppconnect_divergent_sessions ]; then
+            SESSOES_PROBLEMA=$(cat /tmp/wppconnect_divergent_sessions)
+            log_debug "[REBUILD] Sessões que causaram rebuild: $SESSOES_PROBLEMA"
+        fi
 
-    for dias, tipo_mensagem in dias_envio:
-        data_referencia = localtime().date() + timedelta(days=dias)
+        # Enviar notificação de sucesso
+        local MOTIVO="Divergência detectada entre status-session e check-connection (problema de detached frame no Puppeteer). O container foi reconstruído automaticamente para restaurar a funcionalidade."
+        send_notification "sucesso" "$MOTIVO" "$SESSOES_PROBLEMA"
 
-        mensalidades = Mensalidade.objects.filter(
-            usuario=usuario_query,
-            dt_vencimento=data_referencia,
-            cliente__nao_enviar_msgs=False,
-            pgto=False,
-            cancelado=False
-        )
+        log_debug "[REBUILD] =========================================="
+        return 0
+    else
+        log_debug "[REBUILD] ALERTA: Rebuild concluído mas API não responde (HTTP: $API_CHECK)"
+        log_debug "[REBUILD] Pode ser necessário verificar logs do container manualmente"
+        API_STATUS_TEXT="FALHA (HTTP $API_CHECK) - Pós-rebuild"
 
-        logger.info(
-            "Mensalidades a vencer | tipo=%s quantidade=%d data_ref=%s usuario=%s",
-            tipo_mensagem.upper(),
-            mensalidades.count(),
-            data_referencia.strftime('%d-%m-%Y'),
-            usuario_query
-        )
+        # Ler sessões que causaram o problema
+        local SESSOES_PROBLEMA=""
+        if [ -f /tmp/wppconnect_divergent_sessions ]; then
+            SESSOES_PROBLEMA=$(cat /tmp/wppconnect_divergent_sessions)
+        fi
 
-        for mensalidade in mensalidades:
-            cliente = mensalidade.cliente
-            usuario = mensalidade.usuario
-            telefone = str(cliente.telefone).strip()
-            if not telefone:
-                registrar_log_auditoria({
-                    "funcao": "obter_mensalidades_a_vencer",
-                    "status": "cancelado_sem_telefone",
-                    "usuario": str(usuario),
-                    "cliente": cliente.nome,
-                    "cliente_id": cliente.id,
-                    "tipo_envio": tipo_mensagem,
-                    "mensalidade_id": mensalidade.id,
-                })
-                continue
+        # Enviar notificação de falha
+        local MOTIVO="Divergência detectada entre status-session e check-connection. O rebuild foi executado mas a API não está respondendo (HTTP: $API_CHECK). Verificação manual necessária."
+        send_notification "falha" "$MOTIVO" "$SESSOES_PROBLEMA"
 
-            sessao = SessaoWpp.objects.filter(usuario=usuario, is_active=True).first()
-            if not sessao:
-                registrar_log_auditoria({
-                    "funcao": "obter_mensalidades_a_vencer",
-                    "status": "sessao_indisponivel",
-                    "usuario": str(usuario),
-                    "cliente": cliente.nome,
-                    "cliente_id": cliente.id,
-                    "tipo_envio": tipo_mensagem,
-                    "mensalidade_id": mensalidade.id,
-                })
-                continue
+        log_debug "[REBUILD] =========================================="
+        return 1
+    fi
+}
 
-            primeiro_nome = cliente.nome.split()[0].upper()
-            dt_formatada = mensalidade.dt_vencimento.strftime("%d/%m")
-            plano_nome = cliente.plano.nome.upper()
+# Função para verificar uma sessão específica e popular arrays
+# Retorna: 0 = OK, 1 = Divergência detectada
+check_session() {
+    local SESSION="$1"
+    local TOKEN="$2"
 
-            mensagem = None
+    log_debug "[SESSION] ------------------------------------------"
+    log_debug "[SESSION] Verificando sessão: $SESSION"
 
-            # Verificar forma de pagamento
-            forma_pgto = cliente.forma_pgto.nome
+    # Verificar status-session
+    log_debug "[SESSION] Consultando: GET ${API_URL}/${SESSION}/status-session"
+    local STATUS_FULL_RESP=$(curl -s -w "\n%{http_code}" --max-time 10 \
+        -H "Authorization: Bearer $TOKEN" \
+        "${API_URL}/${SESSION}/status-session" 2>/dev/null)
+    local STATUS_HTTP_CODE="${STATUS_FULL_RESP##*$'\n'}"
+    local STATUS_RESP="${STATUS_FULL_RESP%$'\n'*}"
+    local STATUS=$(echo "$STATUS_RESP" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
 
-            if tipo_mensagem == "à vencer 1 dias":
-                # Não enviar mensagens de vencimento para clientes com CARTÃO
-                if forma_pgto == "Cartão de Crédito":
-                    registrar_log_auditoria({
-                        "funcao": "obter_mensalidades_a_vencer",
-                        "status": "ignorado_cartao_credito",
-                        "usuario": str(usuario),
-                        "cliente": cliente.nome,
-                        "cliente_id": cliente.id,
-                        "tipo_envio": tipo_mensagem,
-                        "mensalidade_id": mensalidade.id,
-                    })
+    log_debug "[SESSION] Resposta status-session: status=$STATUS (HTTP $STATUS_HTTP_CODE)"
+    log_debug "[SESSION] Resposta completa: $STATUS_RESP"
+
+    # Verificar check-connection-session
+    log_debug "[SESSION] Consultando: GET ${API_URL}/${SESSION}/check-connection-session"
+    local CHECK_FULL_RESP=$(curl -s -w "\n%{http_code}" --max-time 10 \
+        -H "Authorization: Bearer $TOKEN" \
+        "${API_URL}/${SESSION}/check-connection-session" 2>/dev/null)
+    local CHECK_HTTP_CODE="${CHECK_FULL_RESP##*$'\n'}"
+    local CHECK_RESP="${CHECK_FULL_RESP%$'\n'*}"
+    local CHECK_STATUS=$(echo "$CHECK_RESP" | grep -o '"status":[^,}]*' | cut -d':' -f2 | tr -d ' ')
+    local CHECK_MSG=$(echo "$CHECK_RESP" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)
+
+    log_debug "[SESSION] Resposta check-connection: status=$CHECK_STATUS, message=$CHECK_MSG (HTTP $CHECK_HTTP_CODE)"
+    log_debug "[SESSION] Resposta completa: $CHECK_RESP"
+
+    # Análise de divergência
+    log_debug "[SESSION] Análise: status-session=$STATUS | check-connection=$CHECK_STATUS ($CHECK_MSG)"
+
+    # Verificar erros de API
+    if [[ "$STATUS_HTTP_CODE" != "200" ]] || [[ -z "$STATUS" ]]; then
+        # Verificar se é erro Cloudflare ou interno
+        if is_cloudflare_error "$STATUS_RESP" "$STATUS_HTTP_CODE"; then
+            FLAG_CLOUDFLARE_ERROR=true
+            log_debug "[SESSION] ERRO CLOUDFLARE detectado para sessão $SESSION"
+        elif is_internal_error "$STATUS_RESP" "$STATUS_HTTP_CODE"; then
+            FLAG_INTERNAL_ERROR=true
+            log_debug "[SESSION] ERRO INTERNO detectado para sessão $SESSION"
+        fi
+        SESSIONS_ERROR+=("$SESSION (HTTP $STATUS_HTTP_CODE)")
+        log_debug "[SESSION] ERRO: Falha ao verificar sessão $SESSION (HTTP $STATUS_HTTP_CODE)"
+        log_debug "[SESSION] ------------------------------------------"
+        return 0  # Não é divergência, é erro de API
+    fi
+
+    # Classificar sessão baseado no status
+    if [ "$STATUS" = "CONNECTED" ]; then
+        if [ "$CHECK_STATUS" = "false" ] || [ "$CHECK_MSG" = "Disconnected" ]; then
+            # DIVERGÊNCIA: status-session diz CONNECTED mas check-connection diz false
+            SESSIONS_DIVERGENT+=("$SESSION")
+            log_debug "[SESSION] DIVERGÊNCIA DETECTADA!"
+            log_debug "[SESSION] -> status-session diz CONNECTED"
+            log_debug "[SESSION] -> check-connection diz $CHECK_STATUS ($CHECK_MSG)"
+            log_debug "[SESSION] -> Isso indica problema de 'detached frame' no Puppeteer"
+            log_debug "[SESSION] ------------------------------------------"
+            return 1  # Problema detectado
+        else
+            # CONECTADA: Sessão funcionando normalmente
+            SESSIONS_CONNECTED+=("$SESSION")
+            log_debug "[SESSION] OK: Sessão conectada e funcionando normalmente"
+        fi
+    elif [ "$STATUS" = "DISCONNECTED" ] || [ "$STATUS" = "CLOSED" ]; then
+        # DESCONECTADA: Status normal, não é erro
+        SESSIONS_DISCONNECTED+=("$SESSION")
+        log_debug "[SESSION] INFO: Sessão está desconectada (status=$STATUS)"
+        log_debug "[SESSION] Isso é esperado se o usuário desconectou manualmente"
+    elif [ -z "$STATUS" ]; then
+        # ERRO: Resposta vazia ou inválida
+        SESSIONS_ERROR+=("$SESSION (resposta vazia)")
+        log_debug "[SESSION] ALERTA: Não foi possível obter status da sessão"
+        log_debug "[SESSION] Resposta vazia ou inválida da API"
+    else
+        # Outros status (QRCODE, STARTING, etc.)
+        SESSIONS_DISCONNECTED+=("$SESSION ($STATUS)")
+        log_debug "[SESSION] INFO: Status da sessão: $STATUS"
+    fi
+
+    log_debug "[SESSION] ------------------------------------------"
+    return 0  # OK
+}
+
+# ==================== INÍCIO DA VERIFICAÇÃO ====================
+
+# Obter número do ciclo e resetar estado
+CYCLE_NUMBER=$(get_cycle_number)
+reset_cycle_state
+
+# Rotacionar logs se necessário
+rotate_debug_log
+rotate_monitor_log
+
+log_separator
+log_debug "[MONITOR] =========================================="
+log_debug "[MONITOR] Iniciando verificação do WPPCONNECT - Ciclo #$CYCLE_NUMBER"
+log_debug "[MONITOR] Script: $0"
+log_debug "[MONITOR] Diretório: $SCRIPT_DIR"
+log_debug "[MONITOR] API URL: $API_URL"
+log_debug "[MONITOR] Threshold divergências: $DIVERGENCE_THRESHOLD"
+log_debug "[MONITOR] =========================================="
+
+# Etapa 1: Verificar se container está rodando
+log_debug "[ETAPA 1] Verificando status do container..."
+log_debug "[ETAPA 1] Comando: docker inspect -f '{{.State.Running}}' wppconnect-server"
+
+CONTAINER_RUNNING=$(docker inspect -f '{{.State.Running}}' wppconnect-server 2>/dev/null)
+CONTAINER_EXISTS=$?
+
+if [ $CONTAINER_EXISTS -ne 0 ]; then
+    CONTAINER_STATUS_TEXT="NÃO EXISTE"
+    log_debug "[ETAPA 1] ERRO: Container wppconnect-server não existe"
+    log_debug "[ETAPA 1] Ação: Tentando reiniciar..."
+    restart_container
+    echo "0" > "$DIVERGENCE_FILE"
+    log_debug "[MONITOR] Verificação encerrada (container não existia)"
+    write_monitor_result "$CYCLE_NUMBER"
+    log_separator
+    exit 0
+fi
+
+log_debug "[ETAPA 1] Container existe. Estado: Running=$CONTAINER_RUNNING"
+
+if [ "$CONTAINER_RUNNING" != "true" ]; then
+    CONTAINER_STATUS_TEXT="PARADO"
+    log_debug "[ETAPA 1] PROBLEMA: Container não está rodando (Running=$CONTAINER_RUNNING)"
+    log_debug "[ETAPA 1] Ação: Reiniciando container..."
+    restart_container
+    echo "0" > "$DIVERGENCE_FILE"
+    log_debug "[MONITOR] Verificação encerrada (container reiniciado)"
+    write_monitor_result "$CYCLE_NUMBER"
+    log_separator
+    exit 0
+fi
+
+CONTAINER_STATUS_TEXT="RUNNING ✓"
+log_debug "[ETAPA 1] OK: Container está rodando"
+
+# Etapa 2: Verificar se API responde (com retry)
+log_debug "[ETAPA 2] Verificando se API responde..."
+log_debug "[ETAPA 2] URL: ${API_URL}/"
+log_debug "[ETAPA 2] Timeout: 10 segundos por tentativa"
+log_debug "[ETAPA 2] Máximo de tentativas: 3"
+
+# Configuração de retry
+MAX_RETRIES=3
+RETRY_INTERVAL=5
+RETRY_COUNT=0
+API_IS_DOWN=false
+API_HTTP_CODE=""
+API_BODY=""
+API_HEADERS=""
+
+# Loop de retry para evitar restart por erro transiente
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    log_debug "[ETAPA 2] Tentativa $RETRY_COUNT/$MAX_RETRIES..."
+
+    # Capturar resposta completa com headers usando arquivo temporário
+    TEMP_HEADERS=$(mktemp)
+    API_BODY=$(curl -s -D "$TEMP_HEADERS" -w "\n%{http_code}" --max-time 10 "${API_URL}/" 2>/dev/null)
+    API_HTTP_CODE="${API_BODY##*$'\n'}"
+    API_BODY="${API_BODY%$'\n'*}"
+    API_HEADERS=$(cat "$TEMP_HEADERS" 2>/dev/null)
+    rm -f "$TEMP_HEADERS"
+
+    log_debug "[ETAPA 2] Resposta HTTP: $API_HTTP_CODE"
+
+    # Verificar se a resposta é válida (não é erro 5xx ou falha de conexão)
+    if [ "$API_HTTP_CODE" != "000" ] && [ -n "$API_HTTP_CODE" ] && [ "$API_HTTP_CODE" -lt 500 ] 2>/dev/null; then
+        log_debug "[ETAPA 2] API respondeu OK na tentativa $RETRY_COUNT"
+        break
+    fi
+
+    # Se ainda há tentativas, aguardar antes de retry
+    if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+        log_debug "[ETAPA 2] Tentativa $RETRY_COUNT falhou (HTTP $API_HTTP_CODE)"
+        log_debug "[ETAPA 2] Aguardando ${RETRY_INTERVAL}s antes da próxima tentativa..."
+        sleep $RETRY_INTERVAL
+    fi
+done
+
+# Avaliar resposta final após todas as tentativas:
+# - 000 = Falha de conexão (curl não conseguiu conectar)
+# - 5xx = Erro interno do servidor
+# - 200, 404, 401, 403 = API está respondendo (servidor está UP)
+#
+# Nota: 404 na rota raiz /api/ é normal - significa que a API está UP mas não tem rota nesse path
+
+if [ "$API_HTTP_CODE" = "000" ]; then
+    FLAG_API_ERROR=true
+    API_STATUS_TEXT="FALHA CONEXÃO (HTTP 000) após $RETRY_COUNT tentativas"
+    log_debug "[ETAPA 2] PROBLEMA: Falha de conexão (HTTP 000) após $RETRY_COUNT tentativas"
+    log_debug "[ETAPA 2] Possíveis causas:"
+    log_debug "[ETAPA 2]   - Container não está expondo a porta"
+    log_debug "[ETAPA 2]   - Problema de rede/DNS"
+    log_debug "[ETAPA 2]   - Timeout de conexão"
+    API_IS_DOWN=true
+
+    # Capturar diagnóstico
+    capture_diagnostic_info "000" "$API_BODY" "$API_HEADERS"
+
+elif [ "$API_HTTP_CODE" -ge 500 ] 2>/dev/null; then
+    FLAG_API_ERROR=true
+
+    # Logar headers e corpo para debug
+    log_debug "[ETAPA 2] === HEADERS DA RESPOSTA ==="
+    echo "$API_HEADERS" | while read -r line; do
+        log_debug "[ETAPA 2][HEADER] $line"
+    done
+    log_debug "[ETAPA 2] === CORPO DA RESPOSTA (primeiros 500 chars) ==="
+    log_debug "[ETAPA 2][BODY] ${API_BODY:0:500}"
+    log_debug "[ETAPA 2] === FIM DA RESPOSTA ==="
+
+    # Verificar se é erro Cloudflare ou interno
+    if is_cloudflare_error "$API_BODY" "$API_HTTP_CODE"; then
+        FLAG_CLOUDFLARE_ERROR=true
+        API_STATUS_TEXT="ERRO CLOUDFLARE (HTTP $API_HTTP_CODE) após $RETRY_COUNT tentativas"
+        log_debug "[ETAPA 2] PROBLEMA: Erro Cloudflare detectado (HTTP $API_HTTP_CODE)"
+    elif is_internal_error "$API_BODY" "$API_HTTP_CODE"; then
+        FLAG_INTERNAL_ERROR=true
+        API_STATUS_TEXT="ERRO INTERNO (HTTP $API_HTTP_CODE) após $RETRY_COUNT tentativas"
+        log_debug "[ETAPA 2] PROBLEMA: Erro interno do servidor (HTTP $API_HTTP_CODE)"
+    else
+        API_STATUS_TEXT="ERRO (HTTP $API_HTTP_CODE) após $RETRY_COUNT tentativas"
+        log_debug "[ETAPA 2] PROBLEMA: Erro do servidor (HTTP $API_HTTP_CODE)"
+    fi
+    log_debug "[ETAPA 2] Possíveis causas:"
+    log_debug "[ETAPA 2]   - Serviço com erro fatal"
+    log_debug "[ETAPA 2]   - Falta de memória/recursos"
+    log_debug "[ETAPA 2]   - Proxy reverso (Cloudflare/nginx) não consegue conectar ao backend"
+    API_IS_DOWN=true
+
+    # Capturar diagnóstico completo
+    capture_diagnostic_info "$API_HTTP_CODE" "$API_BODY" "$API_HEADERS"
+
+elif [ -z "$API_HTTP_CODE" ]; then
+    FLAG_API_ERROR=true
+    API_STATUS_TEXT="RESPOSTA VAZIA após $RETRY_COUNT tentativas"
+    log_debug "[ETAPA 2] PROBLEMA: Resposta vazia do curl"
+    API_IS_DOWN=true
+
+    # Capturar diagnóstico
+    capture_diagnostic_info "EMPTY" "$API_BODY" "$API_HEADERS"
+fi
+
+if [ "$API_IS_DOWN" = true ]; then
+    log_debug "[ETAPA 2] Ação: Reiniciando container..."
+    restart_container
+    echo "0" > "$DIVERGENCE_FILE"
+    log_debug "[MONITOR] Verificação encerrada (API não respondia após $RETRY_COUNT tentativas)"
+    write_monitor_result "$CYCLE_NUMBER"
+    log_separator
+    exit 0
+fi
+
+# API está respondendo (qualquer código 1xx-4xx é válido)
+API_STATUS_TEXT="OK (HTTP $API_HTTP_CODE) ✓"
+log_debug "[ETAPA 2] OK: API respondendo (HTTP $API_HTTP_CODE)"
+if [ "$API_HTTP_CODE" = "404" ]; then
+    log_debug "[ETAPA 2] Nota: 404 na rota raiz é normal - a API está UP, apenas não tem handler nesse path"
+fi
+
+# Etapa 3: Verificar sessões (obtendo tokens do banco de dados Django)
+log_debug "[ETAPA 3] Verificando sessões existentes..."
+log_debug "[ETAPA 3] Banco de dados: $DB_PATH"
+
+SESSION_HAS_DIVERGENCE=false
+
+# Verificar se o banco de dados existe
+if [ ! -f "$DB_PATH" ]; then
+    log_debug "[ETAPA 3] ERRO: Banco de dados não encontrado: $DB_PATH"
+    log_debug "[ETAPA 3] Verifique o caminho DB_PATH no início do script"
+    log_debug "[ETAPA 3] Possíveis localizações:"
+    log_debug "[ETAPA 3]   - ${SCRIPT_DIR}/nossopainel-django/database/db.sqlite3"
+    log_debug "[ETAPA 3]   - /root/Docker/ubuntu/nossopainel-django/database/db.sqlite3"
+else
+    # Verificar se sqlite3 está instalado
+    if ! command -v sqlite3 &> /dev/null; then
+        log_debug "[ETAPA 3] ERRO: sqlite3 não está instalado"
+        log_debug "[ETAPA 3] Instale com: apt-get install sqlite3"
+    else
+        # Consultar sessões ativas no banco Django
+        # Tabela: cadastros_sessaowpp | Campos: usuario, token, is_active
+        log_debug "[ETAPA 3] Consultando sessões ativas no banco Django..."
+
+        QUERY="SELECT usuario, token FROM cadastros_sessaowpp WHERE is_active = 1;"
+        SESSIONS_DATA=$(sqlite3 -separator '|' "$DB_PATH" "$QUERY" 2>/dev/null)
+
+        if [ -z "$SESSIONS_DATA" ]; then
+            log_debug "[ETAPA 3] Nenhuma sessão ativa encontrada no banco"
+        else
+            # Contar sessões
+            TOTAL_SESSIONS=$(echo "$SESSIONS_DATA" | wc -l)
+            log_debug "[ETAPA 3] Sessões ativas encontradas: $TOTAL_SESSIONS"
+
+            # Limpar arquivo temporário de sessões divergentes (para notificação)
+            rm -f /tmp/wppconnect_divergent_sessions
+
+            # Iterar sobre cada sessão (formato: usuario|token)
+            # Usar redirecionamento ao invés de pipe para evitar subshell
+            while IFS='|' read -r SESSION_NAME TOKEN; do
+                if [ -z "$SESSION_NAME" ] || [ -z "$TOKEN" ]; then
+                    log_debug "[ETAPA 3] ALERTA: Linha inválida no resultado da consulta"
                     continue
-
-                # Template para BOLETO
-                if forma_pgto == "Boleto":
-                    mensagem = (
-                        f"⚠️ *ATENÇÃO, {primeiro_nome}!* ⚠️\n\n"
-                        f"▫️ *DETALHES DO SEU PLANO:*\n"
-                        f"_________________________________\n"
-                        f"🔖 *Plano*: {plano_nome}\n"
-                        f"📆 *Vencimento*: {dt_formatada}\n"
-                        f"💰 *Valor*: R$ {mensalidade.valor}\n"
-                        f"_________________________________\n\n"
-                        f"▫️ *PAGAMENTO COM BOLETO:*\n"
-                        f"✉️ O seu boleto já foi emitido\n"
-                        f"📧 Caso não o identifique em seu e-mail, solicite aqui no WhatsApp\n\n"
-                        f"‼️ _Caso já tenha pago, desconsidere esta mensagem._"
-                    )
-                else:
-                    # Template para PIX (padrão)
-                    dados = DadosBancarios.objects.filter(usuario=usuario).first()
-                    if not dados:
-                        registrar_log_auditoria({
-                            "funcao": "obter_mensalidades_a_vencer",
-                            "status": "dados_bancarios_ausentes",
-                            "usuario": str(usuario),
-                            "cliente": cliente.nome,
-                            "cliente_id": cliente.id,
-                            "tipo_envio": tipo_mensagem,
-                            "mensalidade_id": mensalidade.id,
-                        })
-                        continue
-
-                    mensagem = (
-                        f"⚠️ *ATENÇÃO, {primeiro_nome} !!!* ⚠️\n\n"
-                        f"▫️ *DETALHES DO SEU PLANO:*\n"
-                        f"_________________________________\n"
-                        f"🔖 *Plano*: {plano_nome}\n"
-                        f"📆 *Vencimento*: {dt_formatada}\n"
-                        f"💰 *Valor*: R$ {mensalidade.valor}\n"
-                        f"_________________________________\n\n"
-                        f"▫️ *PAGAMENTO COM PIX:*\n"
-                        f"_________________________________\n"
-                        f"🔑 *Tipo*: {dados.tipo_chave}\n"
-                        f"🔢 *Chave*: {dados.chave}\n"
-                        f"🏦 *Banco*: {dados.instituicao}\n"
-                        f"👤 *Beneficiário*: {dados.beneficiario}\n"
-                        f"_________________________________\n\n"
-                        f"‼️ _Caso já tenha pago, por favor, nos envie o comprovante._"
-                    )
-
-            elif tipo_mensagem == "vence hoje":
-                # Não enviar mensagens de vencimento para clientes com CARTÃO
-                if forma_pgto == "Cartão de Crédito":
-                    registrar_log_auditoria({
-                        "funcao": "obter_mensalidades_a_vencer",
-                        "status": "ignorado_cartao_credito",
-                        "usuario": str(usuario),
-                        "cliente": cliente.nome,
-                        "cliente_id": cliente.id,
-                        "tipo_envio": tipo_mensagem,
-                        "mensalidade_id": mensalidade.id,
-                    })
-                    continue
-
-                mensagem = (
-                    f"⚠️ *ATENÇÃO, {primeiro_nome} !!!* ⚠️\n\n"
-                    f"O seu plano *{plano_nome}* *vence hoje* ({dt_formatada}).\n\n"
-                    f"Evite interrupções e mantenha seu acesso em dia! ✅"
-                )
-
-            if not mensagem:
-                registrar_log(
-                    f"[{localtime().strftime('%d-%m-%Y %H:%M:%S')}] [ERRO][TIPO DESCONHECIDO] [{usuario}] {cliente.nome}",
-                    str(usuario),
-                    DIR_LOGS_AGENDADOS,
-                )
-                registrar_log_auditoria({
-                    "funcao": "obter_mensalidades_a_vencer",
-                    "status": "mensagem_nao_montada",
-                    "usuario": str(usuario),
-                    "cliente": cliente.nome,
-                    "cliente_id": cliente.id,
-                    "tipo_envio": tipo_mensagem,
-                    "mensalidade_id": mensalidade.id,
-                })
-                continue
-
-            # Envio
-            enviar_mensagem_agendada(
-                telefone=telefone,
-                mensagem=mensagem,
-                usuario=usuario,
-                token=sessao.token,
-                cliente=cliente.nome,
-                tipo_envio=tipo_mensagem
-            )
-
-            time.sleep(random.uniform(30, 60))
-##### FIM #####
-
-
-######################################################################
-##### FUNÇÃO PARA FILTRAR AS MENSALIDADES DOS CLIENTES EM ATRASO #####
-######################################################################
-
-def obter_mensalidades_vencidas(usuario_query):
-    dias_atraso = {
-        2: "lembrete atraso",
-        3: "suspensao"
-    }
-
-    for dias, tipo_mensagem in dias_atraso.items():
-        data_referencia = localtime().date() - timedelta(days=dias)
-        mensalidades = Mensalidade.objects.filter(
-            usuario=usuario_query,
-            dt_vencimento=data_referencia,
-            cliente__nao_enviar_msgs=False,
-            pgto=False,
-            cancelado=False
-        )
-
-        logger.info(
-            "Mensalidades vencidas | tipo=%s quantidade=%d dias_atraso=%d data_ref=%s usuario=%s",
-            tipo_mensagem.upper(),
-            mensalidades.count(),
-            dias,
-            data_referencia.strftime('%d-%m-%Y'),
-            usuario_query
-        )
-
-        for mensalidade in mensalidades:
-            cliente = mensalidade.cliente
-            usuario = mensalidade.usuario
-            telefone = str(cliente.telefone).strip()
-            if not telefone:
-                registrar_log_auditoria({
-                    "funcao": "obter_mensalidades_vencidas",
-                    "status": "cancelado_sem_telefone",
-                    "usuario": str(usuario),
-                    "cliente": cliente.nome,
-                    "cliente_id": cliente.id,
-                    "tipo_envio": tipo_mensagem,
-                    "mensalidade_id": mensalidade.id,
-                })
-                continue
-
-            sessao = SessaoWpp.objects.filter(usuario=usuario, is_active=True).first()
-            if not sessao:
-                registrar_log_auditoria({
-                    "funcao": "obter_mensalidades_vencidas",
-                    "status": "sessao_indisponivel",
-                    "usuario": str(usuario),
-                    "cliente": cliente.nome,
-                    "cliente_id": cliente.id,
-                    "tipo_envio": tipo_mensagem,
-                    "mensalidade_id": mensalidade.id,
-                })
-                continue
-
-            primeiro_nome = cliente.nome.split()[0]
-            saudacao = get_saudacao_por_hora(localtime().time())
-
-            if tipo_mensagem == "lembrete atraso":
-                mensagem = (
-                    f"*{saudacao}, {primeiro_nome} 😊*\n\n"
-                    f"*Ainda não identificamos o pagamento da sua mensalidade para renovação.*\n\n"
-                    f"Caso já tenha feito, envie aqui novamente o seu comprovante, por favor!"
-                )
-            elif tipo_mensagem == "suspensao":
-                mensagem = (
-                    f"*{saudacao}, {primeiro_nome}*\n\n"
-                    f"Informamos que, devido à falta de pagamento, o seu acesso ao sistema está sendo *suspenso*.\n\n"
-                    f"⚠️ Se o seu plano atual for promocional ou incluir algum desconto, esses benefícios poderão não estar mais disponíveis para futuras renovações.\n\n"
-                    f"Agradecemos pela confiança e esperamos poder contar com você novamente em breve."
-                )
-
-            enviar_mensagem_agendada(
-                telefone=telefone,
-                mensagem=mensagem,
-                usuario=usuario,
-                token=sessao.token,
-                cliente=cliente.nome,
-                tipo_envio=f"Atraso {dias}d"
-            )
-
-            time.sleep(random.uniform(30, 60))
-##### FIM #####
-
-
-################################################################################################
-##### BLOCO DE ENVIO DE MENSAGENS PERSONALIZADAS PARA CLIENTES CANCELADOS POR QTD. DE DIAS #####
-################################################################################################
-
-def obter_mensalidades_canceladas():
-    """
-    Envia mensagens personalizadas para clientes cancelados há X dias.
-
-    Sistema de ofertas progressivas:
-    - 20 dias: Feedback
-    - 60 dias: Oferta 1 (2 meses)
-    - 240 dias: Oferta 2 (8 meses)
-    - 420 dias: Oferta 3 (14 meses)
-
-    Cada cliente recebe no máximo 3 ofertas promocionais em toda a vida.
-    A contagem de dias é sempre a partir da data_cancelamento atual.
-    """
-    admin = User.objects.filter(is_superuser=True).order_by('id').first()
-
-    # Mensagem de feedback (20 dias)
-    feedback_config = {
-        "dias": 20,
-        "tipo": "feedback",
-        "mensagem": "*{}, {}* 🫡\n\nTudo bem? Espero que sim.\n\nFaz um tempo que você deixou de ser nosso cliente ativo e ficamos preocupados. Houve algo que não agradou em nosso sistema?\n\nPergunto, pois se algo não agradou, nos informe para fornecermos uma plataforma melhor para você, tá bom?\n\nEstamos à disposição! 🙏🏼"
-    }
-
-    # Ofertas promocionais progressivas
-    ofertas_config = [
-        {
-            "dias": 60,
-            "numero_oferta": 1,
-            "mensagem": "*Opa.. {}, {}!! Tudo bacana?*\n\nComo você já foi nosso cliente, trago uma notícia que talvez você goste muuuiito!!\n\nVocê pode renovar a sua mensalidade conosco pagando *APENAS R$ 24.90* nos próximos 3 meses. Olha só que bacana?!?!\n\nEsse tipo de desconto não oferecemos a qualquer um, viu? rsrs\n\nCaso tenha interesse, avise aqui, pois iremos garantir essa oferta apenas essa semana. 👏🏼👏🏼"
-        },
-        {
-            "dias": 240,
-            "numero_oferta": 2,
-            "mensagem": "*{}, {}!* 😊\n\nSentimos muito a sua falta por aqui!\n\nQue tal voltar para a nossa família com uma *SUPER OFERTA EXCLUSIVA*?\n\nEstamos oferecendo *os próximos 3 meses por apenas R$ 24,90 cada* para você que já foi nosso cliente! 🎉\n\nEsta é uma oportunidade única de retornar com um preço especial. Não perca!\n\nTem interesse? É só responder aqui! 🙌"
-        },
-        {
-            "dias": 420,
-            "numero_oferta": 3,
-            "mensagem": "*{}, {}!* 🌟\n\nEsta é a nossa *ÚLTIMA OFERTA ESPECIAL* para você!\n\nSabemos que você já foi parte da nossa família e queremos muito ter você de volta.\n\n✨ *OFERTA FINAL: R$ 24,90 para os próximos 3 meses* ✨\n\nEsta é realmente a última oportunidade de aproveitar este preço exclusivo.\n\nO que acha? Vamos renovar essa parceria? 🤝"
-        }
-    ]
-
-    # Processa feedback de 20 dias (separado das ofertas)
-    _processar_feedback(admin, feedback_config)
-
-    # Processa ofertas promocionais progressivas
-    for oferta_config in ofertas_config:
-        _processar_oferta_promocional(admin, oferta_config)
-
-
-def _processar_feedback(admin, config):
-    """Processa envio de feedback para clientes cancelados há 20 dias."""
-    qtd_dias = config["dias"]
-    mensagem_template = config["mensagem"]
-    data_alvo = localtime().date() - timedelta(days=qtd_dias)
-
-    # Busca clientes cancelados há exatamente 20 dias
-    clientes = Cliente.objects.filter(
-        usuario=admin,
-        cancelado=True,
-        nao_enviar_msgs=False,
-        data_cancelamento=data_alvo
-    )
-
-    qtd = clientes.count()
-    logger.info(
-        "Feedback para cancelados | dias=%d quantidade=%d",
-        qtd_dias,
-        qtd
-    )
-
-    if not qtd:
-        logger.debug("Nenhum feedback para enviar (20 dias)")
-        return
-
-    for cliente in clientes:
-        _enviar_mensagem_cliente(
-            cliente=cliente,
-            admin=admin,
-            mensagem_template=mensagem_template,
-            qtd_dias=qtd_dias,
-            tipo_envio="Feedback 20d"
-        )
-        time.sleep(random.uniform(30, 60))
-
-
-def _processar_oferta_promocional(admin, oferta_config):
-    """
-    Processa envio de ofertas promocionais progressivas.
-
-    Verifica:
-    1. Se cliente já recebeu 3 ofertas (limite vitalício)
-    2. Se cliente já recebeu esta oferta específica
-    3. Se cliente está cancelado há exatamente X dias
-    """
-    qtd_dias = oferta_config["dias"]
-    numero_oferta = oferta_config["numero_oferta"]
-    mensagem_template = oferta_config["mensagem"]
-    data_alvo = localtime().date() - timedelta(days=qtd_dias)
-
-    # Busca clientes cancelados há exatamente X dias
-    clientes_candidatos = Cliente.objects.filter(
-        usuario=admin,
-        cancelado=True,
-        nao_enviar_msgs=False,
-        data_cancelamento=data_alvo
-    )
-
-    clientes_enviados = 0
-    clientes_ignorados = 0
-
-    for cliente in clientes_candidatos:
-        # Verifica quantas ofertas este cliente já recebeu na vida
-        total_ofertas_recebidas = cliente.ofertas_enviadas.count()
-
-        if total_ofertas_recebidas >= 3:
-            logger.debug(
-                "Cliente atingiu limite de ofertas | cliente=%s total_ofertas=%d",
-                cliente.nome,
-                total_ofertas_recebidas
-            )
-            registrar_log_auditoria({
-                "funcao": "_processar_oferta_promocional",
-                "status": "limite_ofertas_atingido",
-                "cliente": cliente.nome,
-                "cliente_id": cliente.id,
-                "total_ofertas_recebidas": total_ofertas_recebidas,
-                "numero_oferta_tentada": numero_oferta,
-                "dias_cancelado": qtd_dias,
-            })
-            clientes_ignorados += 1
-            continue
-
-        # Verifica se já recebeu ESTA oferta específica
-        ja_recebeu_esta_oferta = cliente.ofertas_enviadas.filter(
-            numero_oferta=numero_oferta
-        ).exists()
-
-        if ja_recebeu_esta_oferta:
-            logger.debug(
-                "Cliente já recebeu esta oferta | cliente=%s numero_oferta=%d",
-                cliente.nome,
-                numero_oferta
-            )
-            registrar_log_auditoria({
-                "funcao": "_processar_oferta_promocional",
-                "status": "oferta_ja_recebida",
-                "cliente": cliente.nome,
-                "cliente_id": cliente.id,
-                "numero_oferta": numero_oferta,
-                "dias_cancelado": qtd_dias,
-            })
-            clientes_ignorados += 1
-            continue
-
-        # Cliente elegível! Envia oferta
-        sucesso = _enviar_mensagem_cliente(
-            cliente=cliente,
-            admin=admin,
-            mensagem_template=mensagem_template,
-            qtd_dias=qtd_dias,
-            tipo_envio=f"Oferta {numero_oferta}"
-        )
-
-        if sucesso:
-            # Registra no histórico de ofertas
-            OfertaPromocionalEnviada.objects.create(
-                cliente=cliente,
-                usuario=admin,
-                numero_oferta=numero_oferta,
-                dias_apos_cancelamento=qtd_dias,
-                data_cancelamento_ref=cliente.data_cancelamento,
-                mensagem_enviada=mensagem_template
-            )
-
-            clientes_enviados += 1
-
-            logger.info(
-                "Oferta enviada e registrada | cliente=%s numero_oferta=%d total_ofertas_cliente=%d",
-                cliente.nome,
-                numero_oferta,
-                total_ofertas_recebidas + 1
-            )
-
-            registrar_log_auditoria({
-                "funcao": "_processar_oferta_promocional",
-                "status": "oferta_enviada",
-                "cliente": cliente.nome,
-                "cliente_id": cliente.id,
-                "numero_oferta": numero_oferta,
-                "dias_cancelado": qtd_dias,
-                "total_ofertas_apos_envio": total_ofertas_recebidas + 1,
-            })
-
-        time.sleep(random.uniform(30, 60))
-
-    logger.info(
-        "Processamento oferta concluído | numero_oferta=%d dias=%d enviados=%d ignorados=%d",
-        numero_oferta,
-        qtd_dias,
-        clientes_enviados,
-        clientes_ignorados
-    )
-
-
-def _enviar_mensagem_cliente(cliente, admin, mensagem_template, qtd_dias, tipo_envio):
-    """
-    Envia mensagem para um cliente específico.
-
-    Returns:
-        bool: True se enviou com sucesso, False caso contrário
-    """
-    primeiro_nome = cliente.nome.split(' ')[0]
-    saudacao = get_saudacao_por_hora()
-    mensagem = mensagem_template.format(saudacao, primeiro_nome)
-
-    sessao = SessaoWpp.objects.filter(usuario=admin, is_active=True).first()
-
-    if not sessao or not sessao.token:
-        logger.warning("Sessão WPP não encontrada | usuario=%s", admin)
-        registrar_log_auditoria({
-            "funcao": "_enviar_mensagem_cliente",
-            "status": "sessao_indisponivel",
-            "usuario": str(admin),
-            "cliente": cliente.nome,
-            "cliente_id": cliente.id,
-            "dias_cancelado": qtd_dias,
-            "tipo_envio": tipo_envio,
-        })
-        return False
-
-    try:
-        enviar_mensagem_agendada(
-            telefone=cliente.telefone,
-            mensagem=mensagem,
-            usuario=admin,
-            token=sessao.token,
-            cliente=cliente.nome,
-            tipo_envio=tipo_envio
-        )
-        return True
-    except Exception as e:
-        logger.error(
-            "Erro ao enviar mensagem | cliente=%s erro=%s",
-            cliente.nome,
-            str(e),
-            exc_info=True
-        )
-        registrar_log_auditoria({
-            "funcao": "_enviar_mensagem_cliente",
-            "status": "erro_envio",
-            "usuario": str(admin),
-            "cliente": cliente.nome,
-            "cliente_id": cliente.id,
-            "dias_cancelado": qtd_dias,
-            "tipo_envio": tipo_envio,
-            "erro": str(e),
-        })
-        return False
-##### FIM #####
-
-
-#####################################################################################################
-##### BLOCO PARA ENVIO DE MENSAGENS AOS CLIENTES ATIVOS, CANCELADOS E FUTUROS CLIENTES (AVULSO) #####
-#####################################################################################################
-
-def envia_mensagem_personalizada(
-    tipo_envio: str,
-    image_name: str = None,
-    nome_msg: str = None,
-    mensagem_direta: str = None,
-    image_path: str = None,
-    usuario_id: int = None
-) -> dict:
-    """
-    Envia mensagens via WhatsApp para grupos de clientes com base no tipo de envio:
-    - 'ativos': clientes em dia.
-    - 'cancelados': clientes inativos há mais de 40 dias.
-    - 'avulso': números importados via arquivo externo.
-
-    Parâmetros:
-        tipo_envio (str): Tipo de grupo alvo ('ativos', 'cancelados', 'avulso').
-        image_name (str): Nome da imagem opcional a ser enviada (modo legado).
-        nome_msg (str): Nome do template da mensagem (modo legado).
-        mensagem_direta (str): Mensagem direta a ser enviada (modo TarefaEnvio).
-        image_path (str): Caminho completo da imagem (modo TarefaEnvio).
-        usuario_id (int): ID do usuário para envio (modo TarefaEnvio).
-
-    Retorna:
-        dict: {'enviados': int, 'erros': int, 'detalhes': list}
-
-    A mensagem só é enviada se:
-    - O número for validado via API do WhatsApp.
-    - Ainda não tiver sido enviada naquele dia.
-    """
-    # Resultado para retorno
-    resultado = {'enviados': 0, 'erros': 0, 'detalhes': []}
-
-    # Determina o usuário
-    if usuario_id:
-        usuario = User.objects.get(id=usuario_id)
-    else:
-        usuario = User.objects.get(id=1)
-    sessao = SessaoWpp.objects.filter(usuario=usuario).first()
-    if not sessao or not sessao.token:
-        logger.error("Sessão/token WPP ausente", extra={"user": usuario.username})
-        registrar_log_auditoria({
-            "funcao": "envia_mensagem_personalizada",
-            "status": "abortado_sem_sessao",
-            "usuario": usuario.username,
-            "tipo_envio": tipo_envio,
-        })
-        return resultado
-    token = sessao.token
-
-    # Determina se vai enviar imagem (modo legado ou modo TarefaEnvio)
-    tem_imagem = image_name or image_path
-    url_envio = f"{URL_API_WPP}/{usuario}/send-{'image' if tem_imagem else 'message'}"
-
-    # Obtém a imagem em base64
-    image_base64 = None
-    if image_path and os.path.exists(image_path):
-        # Modo TarefaEnvio: carrega imagem do caminho completo
-        try:
-            with open(image_path, 'rb') as img_file:
-                image_base64 = base64.b64encode(img_file.read()).decode('utf-8')
-        except Exception as e:
-            logger.error(f"Erro ao carregar imagem de TarefaEnvio: {e}")
-    elif image_name:
-        # Modo legado: carrega imagem por nome
-        image_base64 = obter_img_base64(image_name, tipo_envio)
-
-    # Limite de 100 envios por execução
-    total_enviados = 0
-    LIMITE_ENVIO_DIARIO = 100
-
-    destinatarios = []
-
-    # Obtenção dos números com base no tipo
-    if tipo_envio == 'ativos':
-        clientes = Cliente.objects.filter(usuario=usuario, cancelado=False, nao_enviar_msgs=False)
-        destinatarios = [
-            {
-                "telefone": cliente.telefone,
-                "cliente_id": cliente.id,
-                "cliente_nome": cliente.nome,
-            }
-            for cliente in clientes
-        ]
-    elif tipo_envio == 'cancelados':
-        clientes = Cliente.objects.filter(
-            usuario=usuario,
-            cancelado=True,
-            nao_enviar_msgs=False,
-            data_cancelamento__lte=localtime() - timedelta(days=10)
-        )
-        destinatarios = [
-            {
-                "telefone": cliente.telefone,
-                "cliente_id": cliente.id,
-                "cliente_nome": cliente.nome,
-            }
-            for cliente in clientes
-        ]
-    elif tipo_envio == 'avulso':
-        telefones_str = processa_telefones(usuario)
-        numeros = telefones_str.split(',') if telefones_str else []
-        destinatarios = [
-            {
-                "telefone": telefone.strip(),
-                "cliente_id": None,
-                "cliente_nome": None,
-            }
-            for telefone in numeros
-            if telefone.strip()
-        ]
-    else:
-        logger.error("Tipo de envio desconhecido: %s", tipo_envio)
-        return
-
-    if not destinatarios:
-        logger.warning(
-            "Nenhum destinatário encontrado | tipo=%s usuario=%s",
-            tipo_envio,
-            usuario.username
-        )
-        registrar_log_auditoria({
-            "funcao": "envia_mensagem_personalizada",
-            "status": "sem_destinatarios",
-            "usuario": usuario.username,
-            "tipo_envio": tipo_envio,
-        })
-
-    logger.info(
-        "Iniciando envios personalizados | tipo=%s quantidade=%d usuario=%s",
-        tipo_envio.upper(),
-        len(destinatarios),
-        usuario.username
-    )
-
-    for destinatario in destinatarios:
-        telefone = destinatario["telefone"]
-        cliente_nome = destinatario.get("cliente_nome")
-        cliente_id = destinatario.get("cliente_id")
-        if total_enviados >= LIMITE_ENVIO_DIARIO:
-            logger.warning(
-                "Limite diário atingido | limite=%d enviados=%d",
-                LIMITE_ENVIO_DIARIO,
-                total_enviados
-            )
-            registrar_log_auditoria({
-                "funcao": "envia_mensagem_personalizada",
-                "status": "limite_diario_atingido",
-                "usuario": usuario.username,
-                "tipo_envio": tipo_envio,
-                "total_enviados": total_enviados,
-                "limite": LIMITE_ENVIO_DIARIO,
-            })
-            break
-
-        # Ignora se já enviado hoje
-        if MensagemEnviadaWpp.objects.filter(usuario=usuario, telefone=telefone, data_envio=localtime().now().date()).exists():
-            registrar_log(f"[{datetime.now().strftime('%d-%m-%Y %H:%M:%S')}] {telefone} - ⚠️ Já foi feito envio hoje!", usuario, DIR_LOGS_AGENDADOS)
-            registrar_log_auditoria({
-                "funcao": "envia_mensagem_personalizada",
-                "status": "ignorado_envio_diario",
-                "usuario": usuario.username,
-                "tipo_envio": tipo_envio,
-                "telefone": telefone,
-                "cliente_nome": cliente_nome,
-                "cliente_id": cliente_id,
-            })
-            continue
-
-        # ignora se já enviado neste mês (avulso, ativos e cancelados)
-        if tipo_envio in ["avulso", "ativos", "cancelados"]:
-            hoje = localtime()
-            if MensagemEnviadaWpp.objects.filter(
-                usuario=usuario,
-                telefone=telefone,
-                data_envio__year=hoje.year,
-                data_envio__month=hoje.month
-            ).exists():
-                logger.debug(
-                    "Envio ignorado (já enviado este mês) | telefone=%s tipo=%s usuario=%s",
-                    telefone,
-                    tipo_envio,
-                    usuario.username
-                )
-                registrar_log(f"[{hoje.strftime('%d-%m-%Y %H:%M:%S')}] {telefone} - ⚠️ Já recebeu envio este mês (avulso)", usuario, DIR_LOGS_AGENDADOS)
-                registrar_log_auditoria({
-                    "funcao": "envia_mensagem_personalizada",
-                    "status": "ignorado_envio_mensal",
-                    "usuario": usuario.username,
-                    "tipo_envio": tipo_envio,
-                    "telefone": telefone,
-                    "cliente_nome": cliente_nome,
-                    "cliente_id": cliente_id,
-                })
-                continue
-
-        if not telefone:
-            log = TEMPLATE_LOG_TELEFONE_INVALIDO.format(localtime().strftime('%d-%m-%Y %H:%M:%S'), tipo_envio.upper(), usuario, telefone)
-            registrar_log(log, usuario, DIR_LOGS_AGENDADOS)
-            registrar_log_auditoria({
-                "funcao": "envia_mensagem_personalizada",
-                "status": "cancelado_sem_telefone",
-                "usuario": usuario.username,
-                "tipo_envio": tipo_envio,
-                "telefone": telefone,
-                "cliente_nome": cliente_nome,
-                "cliente_id": cliente_id,
-            })
-            continue
-
-        # Validação via WhatsApp
-        numero_existe = check_number_status(telefone, token, usuario)
-        if not numero_existe or not numero_existe.get('status'):
-            logger.warning(
-                "Número não está no WhatsApp | telefone=%s usuario=%s tipo=%s",
-                telefone,
-                usuario.username,
-                tipo_envio
-            )
-            registrar_log(f"[{datetime.now().strftime('%d-%m-%Y %H:%M:%S')}] {telefone} - ❌ Número inválido no WhatsApp", usuario, DIR_LOGS_AGENDADOS)
-            registrar_log_auditoria({
-                "funcao": "envia_mensagem_personalizada",
-                "status": "numero_invalido",
-                "usuario": usuario.username,
-                "tipo_envio": tipo_envio,
-                "telefone": telefone,
-                "cliente_nome": cliente_nome,
-                "cliente_id": cliente_id,
-            })
-            if tipo_envio == 'avulso':
-                TelefoneLeads.objects.filter(telefone=telefone, usuario=usuario).delete()
-                logger.info(
-                    "Telefone deletado do banco (lead inválido) | telefone=%s usuario=%s",
-                    telefone,
-                    usuario.username
-                )
-                registrar_log(f"[{datetime.now().strftime('%d-%m-%Y %H:%M:%S')}] {telefone} - 🗑️ Deletado do banco (avulso)", usuario, DIR_LOGS_AGENDADOS)
-            continue
-
-        # Obter mensagem: usa mensagem_direta (TarefaEnvio) ou template (legado)
-        if mensagem_direta:
-            message = mensagem_direta
-        else:
-            message = obter_mensagem_personalizada(nome=nome_msg, tipo=tipo_envio, usuario=usuario)
-        if not message:
-            logger.error(
-                "Falha ao gerar mensagem personalizada | nome_msg=%s tipo=%s telefone=%s usuario=%s",
-                nome_msg,
-                tipo_envio,
-                telefone,
-                usuario.username
-            )
-            registrar_log(f"[{datetime.now().strftime('%d-%m-%Y %H:%M:%S')}] {telefone} - ❌ Falha ao gerar variação da mensagem", usuario, DIR_LOGS_AGENDADOS)
-            registrar_log_auditoria({
-                "funcao": "envia_mensagem_personalizada",
-                "status": "erro_template",
-                "usuario": usuario.username,
-                "tipo_envio": tipo_envio,
-                "telefone": telefone,
-                "cliente_nome": cliente_nome,
-                "cliente_id": cliente_id,
-            })
-            continue
-
-        # Monta payload
-        payload = {
-            'phone': telefone,
-            'isGroup': False,
-            'message': message
-        }
-
-        if image_base64:
-            # Determina o nome do arquivo (TarefaEnvio ou legado)
-            if image_path:
-                filename = os.path.basename(image_path)
-            else:
-                filename = image_name or 'imagem.png'
-            payload['filename'] = filename
-            payload['caption'] = message
-            payload['base64'] = f'data:image/png;base64,{image_base64}'
-
-        audit_payload = {k: v for k, v in payload.items() if k != 'base64'}
-        audit_payload["tem_base64"] = bool(payload.get('base64'))
-        audit_payload["arquivo_imagem"] = image_path or image_name
-
-        for tentativa in range(1, 4):
-            response = None
-            response_payload = None
-            status_code = None
-            error_message = None
-            timestamp = localtime().strftime('%d-%m-%Y %H:%M:%S')
-
-            try:
-                response = requests.post(url_envio, headers={
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'Authorization': f'Bearer {token}'
-                }, json=payload)
-                status_code = response.status_code
-
-                try:
-                    response_payload = response.json()
-                except json.JSONDecodeError:
-                    response_payload = response.text
-
-                if status_code in (200, 201):
-                    registrar_log(
-                        TEMPLATE_LOG_MSG_SUCESSO.format(timestamp, tipo_envio.upper(), usuario, telefone),
-                        usuario,
-                        DIR_LOGS_AGENDADOS
-                    )
-                    registro_envio = MensagemEnviadaWpp.objects.create(usuario=usuario, telefone=telefone)
-                    registrar_log_auditoria({
-                        "funcao": "envia_mensagem_personalizada",
-                        "status": "sucesso",
-                        "usuario": usuario.username,
-                        "tipo_envio": tipo_envio,
-                        "telefone": telefone,
-                        "cliente_nome": cliente_nome,
-                        "cliente_id": cliente_id,
-                        "tentativa": tentativa,
-                        "http_status": status_code,
-                        "mensagem": message,
-                        "payload": audit_payload,
-                        "response": response_payload,
-                        "registro_envio_id": registro_envio.id,
-                    })
-                    total_enviados += 1
-                    resultado['enviados'] += 1
-                    break
-
-                error_message = (
-                    response_payload.get('message', 'Erro desconhecido')
-                    if isinstance(response_payload, dict)
-                    else str(response_payload)
-                )
-
-            except requests.RequestException as exc:
-                status_code = getattr(getattr(exc, "response", None), "status_code", None)
-                if getattr(exc, "response", None) is not None:
-                    try:
-                        response_payload = exc.response.json()
-                    except (ValueError, AttributeError):
-                        response_payload = getattr(exc.response, "text", None)
-                error_message = str(exc)
-
-            if status_code in (200, 201):
-                continue
-
-            if error_message is None:
-                error_message = "Erro desconhecido"
-
-            registrar_log(
-                TEMPLATE_LOG_MSG_FALHOU.format(timestamp, tipo_envio.upper(), usuario, telefone, status_code if status_code is not None else 'N/A', tentativa, error_message),
-                usuario, DIR_LOGS_AGENDADOS
-            )
-            registrar_log_auditoria({
-                "funcao": "envia_mensagem_personalizada",
-                "status": "falha",
-                "usuario": usuario.username,
-                "tipo_envio": tipo_envio,
-                "telefone": telefone,
-                "cliente_nome": cliente_nome,
-                "cliente_id": cliente_id,
-                "tentativa": tentativa,
-                "http_status": status_code,
-                "mensagem": message,
-                "erro": error_message,
-                "payload": audit_payload,
-                "response": response_payload,
-            })
-            time.sleep(random.uniform(10, 20))
-        else:
-            # Se saiu do loop sem sucesso (todas tentativas falharam)
-            resultado['erros'] += 1
-
-        time.sleep(random.uniform(30, 180))
-
-    # Retorna resultado para uso em TarefaEnvio
-    return resultado
-
-
-def obter_img_base64(image_name: str, sub_directory: str) -> str:
-    """
-    Converte uma imagem localizada em /images/{sub_directory} para base64.
-
-    Args:
-        image_name (str): Nome do arquivo da imagem.
-        sub_directory (str): Diretório onde a imagem está localizada.
-
-    Returns:
-        str: Imagem codificada em base64 ou None se falhar.
-    """
-    image_path = os.path.join(os.path.dirname(__file__), f'../images/{sub_directory}', image_name)
-
-    try:
-        with open(image_path, 'rb') as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
-    except Exception as e:
-        logger.error(
-            "Erro ao abrir imagem | imagem=%s subdir=%s erro=%s",
-            image_name,
-            sub_directory,
-            str(e)
-        )
-        return None
-
-
-def processa_telefones(usuario: User = None) -> str:
-    """
-    Obtém os telefones dos leads salvos no banco (modelo TelefoneLeads) e retorna uma string com os números limpos, separados por vírgula.
-
-    Args:
-        usuario (User, opcional): Usuário para filtrar os leads. Se None, retorna todos.
-
-    Returns:
-        str: Telefones limpos separados por vírgula.
-    """
-    try:
-        queryset = TelefoneLeads.objects.all()
-        if usuario:
-            queryset = queryset.filter(usuario=usuario)
-
-        telefones = queryset.values_list('telefone', flat=True)
-        numeros_limpos = [
-            re.sub(r'\D', '', t) for t in telefones if t and re.sub(r'\D', '', t)
-        ]
-        return ','.join(numeros_limpos) if numeros_limpos else None
-
-    except Exception as e:
-        logger.error("Erro ao processar telefones | erro=%s", str(e), exc_info=True)
-        return None
-
-
-def obter_mensagem_personalizada(nome: str, tipo: str, usuario: User = None) -> str:
-    """
-    Obtém a mensagem do banco de dados (MensagensLeads) e gera uma versão personalizada via ChatGPT.
-
-    Args:
-        nome (str): Nome identificador da mensagem (ex: 'msg1', 'msg2-2', etc.).
-        tipo (str): Tipo de envio (ex: 'ativos', 'cancelados', 'avulso').
-        usuario (User, opcional): Usuário responsável (pode filtrar mensagens por usuário se necessário).
-
-    Returns:
-        str: Mensagem reescrita com variações, ou None em caso de erro.
-    """
-    try:
-        filtro = MensagensLeads.objects.filter(nome=nome, tipo=tipo)
-        if usuario:
-            filtro = filtro.filter(usuario=usuario)
-
-        mensagem_obj = filtro.first()
-        if not mensagem_obj:
-            logger.warning(
-                "Mensagem não encontrada no banco | nome=%s tipo=%s usuario=%s",
-                nome,
-                tipo,
-                usuario
-            )
-            return None
-
-        mensagem_original = mensagem_obj.mensagem
-
-        prompt = (
-            "Você é um redator especialista em marketing pelo WhatsApp. "
-            "Reescreva o texto abaixo mantendo a mesma intenção, "
-            "mas com frases diferentes, trocando palavras por sinônimos, mudando a ordem e emojis quando necessário, "
-            "deixando o texto natural, envolvente, mas atrativo e adequado para o WhatsApp.\n\n"
-            f"{mensagem_original}"
-        )
-
-        mensagem_reescrita = consultar_chatgpt(pergunta=prompt, user=usuario)
-        return mensagem_reescrita
-
-    except Exception as e:
-        logger.error(
-            "Erro ao obter mensagem personalizada | nome=%s tipo=%s erro=%s",
-            nome,
-            tipo,
-            str(e),
-            exc_info=True
-        )
-        return None
-#### FIM #####
-
-
-##########################################################################
-##### FUNÇÃO PARA EXECUTAR TAREFAS AGENDADAS PARA ENVIO DE MENSAGENS #####
-##########################################################################
-
-def run_scheduled_tasks():
-    """
-    Executa tarefas agendadas de envio de mensagens com base no dia da semana e dia do mês:
-    - Sábado: clientes ativos (2º e último sábado).
-    - Quarta e domingo: clientes avulsos (3 intervalos de dias).
-    - Segunda: clientes cancelados (3 intervalos de dias).
-    """
-    try:
-        now = datetime.now()
-        dia = now.day
-        dia_semana = now.strftime('%A')
-        ano = now.year
-        mes = now.month
-
-        def get_second_saturday(year, month):
-            first_day = datetime(year, month, 1)
-            first_saturday = first_day + timedelta(days=(5 - first_day.weekday()) % 7)
-            return (first_saturday + timedelta(days=7)).day
-
-        def get_last_saturday(year, month):
-            last_day = datetime(year, month, calendar.monthrange(year, month)[1])
-            return (last_day - timedelta(days=(last_day.weekday() - 5) % 7)).day
-
-        second_saturday = get_second_saturday(ano, mes)
-        last_saturday = get_last_saturday(ano, mes)
-
-        # Inicializa parâmetros
-        tipo = None
-        imagem = None
-        nome_msg = None
-
-        if dia_semana in ["Monday", "Wednesday"]:
-            tipo = "ativos"
-            imagem = "img1.png"
-            if dia <= 14:
-                nome_msg = "msg1"
-            elif dia >= 15:
-                nome_msg = "msg2"
-
-        elif dia_semana in ["Tuesday", "Thursday", "Saturday"]:
-            tipo = "avulso"
-            if 1 <= dia <= 10:
-                imagem, nome_msg = "img2-1.png", "msg2-1"
-            elif 11 <= dia <= 20:
-                imagem, nome_msg = "img2-2.png", "msg2-2"
-            elif dia >= 21:
-                imagem, nome_msg = "img2-3.png", "msg2-3"
-            else:
-                nome_msg = None
-
-        elif dia_semana in ["Friday", "Sunday"]:
-            tipo = "cancelados"
-            if 1 <= dia <= 10:
-                imagem, nome_msg = "img3-1.png", "msg3-1"
-            elif 11 <= dia <= 20:
-                imagem, nome_msg = "img3-2.png", "msg3-2"
-            elif dia >= 21:
-                imagem, nome_msg = "img3-3.png", "msg3-3"
-            else:
-                nome_msg = None
-
-        # Execução final do envio
-        if tipo and imagem and nome_msg:
-            logger.info(
-                "Executando envio programado | tipo=%s imagem=%s msg=%s",
-                tipo.upper(),
-                imagem,
-                nome_msg
-            )
-            envia_mensagem_personalizada(tipo_envio=tipo, image_name=imagem, nome_msg=nome_msg)
-        else:
-            logger.debug(
-                "Nenhum envio agendado para hoje | dia_semana=%s dia=%d",
-                dia_semana,
-                dia
-            )
-
-    except Exception as e:
-        logger.error(
-            "Erro em run_scheduled_tasks | erro=%s",
-            str(e),
-            exc_info=True
-        )
-##### FIM #####
-
-
-###########################################################
-##### FUNÇÃO PARA EXECUTAR TAREFAS DE ENVIO DO BANCO  #####
-###########################################################
-
-def run_scheduled_tasks_from_db():
-    """
-    Executa tarefas de envio configuradas no banco de dados (TarefaEnvio).
-    Esta função roda em paralelo com run_scheduled_tasks() que usa lógica hardcoded.
-
-    Verifica a cada execução:
-    - Tarefas ativas
-    - Horário atual dentro da janela de execução (5 minutos de margem)
-    - Se já executou hoje (evita duplicação)
-    - Se deve executar hoje (dia da semana + período do mês)
-    """
-    try:
-        agora = localtime()
-        hoje = agora.date()
-        hora_atual = agora.hour
-        minuto_atual = agora.minute
-
-        logger.debug(
-            "Verificando TarefasEnvio do banco | hora=%02d:%02d",
-            hora_atual,
-            minuto_atual
-        )
-
-        # Busca tarefas ativas que devem executar no horário atual (com margem de 5 min)
-        tarefas = TarefaEnvio.objects.filter(
-            ativo=True,
-            horario__hour=hora_atual,
-        ).select_related('usuario')
-
-        # Filtra por minuto (dentro de janela de 5 minutos)
-        tarefas_para_executar = []
-        for tarefa in tarefas:
-            minuto_tarefa = tarefa.horario.minute
-            # Verifica se está dentro da janela de 5 minutos
-            if minuto_tarefa <= minuto_atual <= minuto_tarefa + 5:
-                tarefas_para_executar.append(tarefa)
-
-        if not tarefas_para_executar:
-            logger.debug("Nenhuma TarefaEnvio para executar neste horário")
-            return
-
-        logger.info(
-            "Encontradas %d TarefasEnvio candidatas para execução",
-            len(tarefas_para_executar)
-        )
-
-        for tarefa in tarefas_para_executar:
-            try:
-                # Pula se já executou hoje
-                if tarefa.ultimo_envio and tarefa.ultimo_envio.date() == hoje:
-                    logger.debug(
-                        "TarefaEnvio já executada hoje | tarefa_id=%d nome=%s",
-                        tarefa.id,
-                        tarefa.nome
-                    )
-                    continue
-
-                # Verifica dia da semana + período do mês
-                if not tarefa.deve_executar_hoje():
-                    logger.debug(
-                        "TarefaEnvio não deve executar hoje | tarefa_id=%d nome=%s",
-                        tarefa.id,
-                        tarefa.nome
-                    )
-                    continue
-
-                logger.info(
-                    "Iniciando execução de TarefaEnvio | tarefa_id=%d nome=%s tipo=%s usuario=%s",
-                    tarefa.id,
-                    tarefa.nome,
-                    tarefa.tipo_envio,
-                    tarefa.usuario.username
-                )
-
-                inicio = time.time()
-
-                # Determina caminho da imagem
-                image_path = None
-                if tarefa.imagem:
-                    image_path = tarefa.imagem.path
-
-                # Executa envio usando a função existente
-                resultado = envia_mensagem_personalizada(
-                    tipo_envio=tarefa.tipo_envio,
-                    mensagem_direta=tarefa.mensagem_plaintext or tarefa.mensagem,
-                    image_path=image_path,
-                    usuario_id=tarefa.usuario_id
-                )
-
-                duracao = int(time.time() - inicio)
-
-                # Determina status
-                if resultado['erros'] == 0 and resultado['enviados'] > 0:
-                    status = 'sucesso'
-                elif resultado['enviados'] > 0:
-                    status = 'parcial'
-                else:
-                    status = 'erro'
-
-                # Registra histórico
-                HistoricoExecucaoTarefa.objects.create(
-                    tarefa=tarefa,
-                    status=status,
-                    quantidade_enviada=resultado['enviados'],
-                    quantidade_erros=resultado['erros'],
-                    detalhes=json.dumps(resultado.get('detalhes', {})),
-                    duracao_segundos=duracao
-                )
-
-                # Atualiza tarefa
-                tarefa.ultimo_envio = agora
-                tarefa.total_envios += resultado['enviados']
-                tarefa.save(update_fields=['ultimo_envio', 'total_envios'])
-
-                logger.info(
-                    "TarefaEnvio concluída | tarefa_id=%d nome=%s status=%s enviados=%d erros=%d duracao=%ds",
-                    tarefa.id,
-                    tarefa.nome,
-                    status,
-                    resultado['enviados'],
-                    resultado['erros'],
-                    duracao
-                )
-
-            except Exception as e:
-                logger.exception(
-                    "Erro ao executar TarefaEnvio | tarefa_id=%d nome=%s erro=%s",
-                    tarefa.id,
-                    tarefa.nome,
-                    str(e)
-                )
-                # Registra erro no histórico
-                HistoricoExecucaoTarefa.objects.create(
-                    tarefa=tarefa,
-                    status='erro',
-                    detalhes=json.dumps({'erro': str(e)}),
-                    duracao_segundos=int(time.time() - inicio) if 'inicio' in locals() else 0
-                )
-
-    except Exception as e:
-        logger.exception("Erro em run_scheduled_tasks_from_db | erro=%s", str(e))
-
-
-###########################################################
-##### FUNÇÃO PARA VALIDAR E EXECUTAR ENVIOS AGENDADOS #####
-###########################################################
-
-# Gerenciamento de locks por usuário (permite processamento paralelo de usuários diferentes)
-_locks_por_usuario = {}
-_locks_manager_lock = threading.Lock()
-
-def _obter_lock_usuario(usuario_id):
-    """
-    Retorna o lock específico de um usuário, criando-o se necessário.
-    Thread-safe através do _locks_manager_lock.
-    """
-    with _locks_manager_lock:
-        if usuario_id not in _locks_por_usuario:
-            _locks_por_usuario[usuario_id] = threading.Lock()
-        return _locks_por_usuario[usuario_id]
-
-
-def executar_envio_para_usuario(h_candidato, agora, hoje):
-    """
-    Executa envio para um usuário específico em thread separada.
-
-    Proteções implementadas:
-    1. threading.Lock() por usuário - evita processamento duplicado do mesmo usuário
-    2. select_for_update(skip_locked=True) - proteção inter-processo via DB
-    3. Update atômico de ultimo_envio antes de iniciar envio
-
-    Args:
-        h_candidato: Registro HorarioEnvios candidato a processamento
-        agora: datetime atual
-        hoje: date atual
-    """
-    usuario_id = h_candidato.usuario.id
-    usuario_lock = _obter_lock_usuario(usuario_id)
-
-    # Verifica se este usuário já está sendo processado neste processo
-    if usuario_lock.locked():
-        registrar_log_auditoria({
-            "funcao": "executar_envio_para_usuario",
-            "status": "usuario_em_processamento_local",
-            "usuario": str(h_candidato.usuario),
-            "tipo_envio": h_candidato.tipo_envio,
-            "horario": str(h_candidato.horario),
-            "motivo": "lock_local_do_usuario_ja_adquirido",
-        })
-        return
-
-    with usuario_lock:
-        try:
-            with transaction.atomic():
-                # select_for_update com skip_locked: se outro processo já travou este registro, pula
-                horarios_locked = HorarioEnvios.objects.select_for_update(
-                    skip_locked=True
-                ).filter(
-                    id=h_candidato.id,
-                    status=True,
-                    ativo=True
-                ).filter(
-                    Q(ultimo_envio__isnull=True) | Q(ultimo_envio__lt=hoje)
-                )
-
-                h = horarios_locked.first()
-
-                if not h:
-                    # Outro processo já pegou este registro ou condições mudaram
-                    registrar_log_auditoria({
-                        "funcao": "executar_envio_para_usuario",
-                        "status": "lock_db_nao_adquirido",
-                        "usuario": str(h_candidato.usuario),
-                        "tipo_envio": h_candidato.tipo_envio,
-                        "horario": str(h_candidato.horario),
-                        "motivo": "registro_travado_por_outro_processo_ou_ja_processado",
-                    })
-                    return
-
-                # Health check ANTES de atualizar ultimo_envio
-                sessao = SessaoWpp.objects.filter(usuario=h.usuario, is_active=True).first()
-                if sessao and sessao.token:
-                    if not verificar_saude_sessao(str(h.usuario), sessao.token):
-                        logger.warning(
-                            "[Health Check] Sessão com problema - envios cancelados | thread=%s usuario=%s tipo=%s",
-                            threading.current_thread().name,
-                            h.usuario,
-                            h.tipo_envio
-                        )
-                        registrar_log_auditoria({
-                            "funcao": "executar_envio_para_usuario",
-                            "status": "cancelado_sessao_problema",
-                            "usuario": str(h.usuario),
-                            "tipo_envio": h.tipo_envio,
-                            "thread": threading.current_thread().name,
-                            "motivo": "health_check_falhou",
-                        })
-                        return  # ultimo_envio NÃO atualizado - permite nova tentativa
-
-                # Guarda valor anterior para possível reversão em caso de erro
-                ultimo_envio_anterior = h.ultimo_envio
-
-                # Lock DB adquirido! Atualiza para bloquear outros processos
-                h.ultimo_envio = hoje
-                h.save(update_fields=['ultimo_envio'])
-
-                logger.info(
-                    "Lock adquirido - iniciando envios | thread=%s usuario=%s tipo=%s horario=%s",
-                    threading.current_thread().name,
-                    h.usuario,
-                    h.tipo_envio,
-                    h.horario
-                )
-
-                registrar_log_auditoria({
-                    "funcao": "executar_envio_para_usuario",
-                    "status": "iniciando",
-                    "usuario": str(h.usuario),
-                    "tipo_envio": h.tipo_envio,
-                    "horario": str(h.horario),
-                    "thread": threading.current_thread().name,
-                })
-
-            # Transação commitada, lock DB liberado. Agora executa o envio (pode demorar)
-            try:
-                if h.tipo_envio == 'mensalidades_a_vencer':
-                    obter_mensalidades_a_vencer(h.usuario)
-                elif h.tipo_envio == 'obter_mensalidades_vencidas':
-                    obter_mensalidades_vencidas(h.usuario)
-
-                logger.info(
-                    "Envios concluídos | thread=%s usuario=%s tipo=%s",
-                    threading.current_thread().name,
-                    h.usuario,
-                    h.tipo_envio
-                )
-
-                registrar_log_auditoria({
-                    "funcao": "executar_envio_para_usuario",
-                    "status": "concluido",
-                    "usuario": str(h.usuario),
-                    "tipo_envio": h.tipo_envio,
-                    "thread": threading.current_thread().name,
-                })
-            except Exception as exc_envio:
-                # Extrai apenas status_code e mensagem (sem HTML)
-                status_code = None
-                error_msg = str(exc_envio)
-
-                if hasattr(exc_envio, 'response') and exc_envio.response is not None:
-                    status_code = exc_envio.response.status_code
-                    try:
-                        error_data = exc_envio.response.json()
-                        error_msg = error_data.get('message', error_data.get('error', str(error_data)))
-                    except Exception:
-                        # Se não for JSON, limita tamanho para evitar HTML
-                        raw_text = exc_envio.response.text
-                        error_msg = raw_text[:200] if len(raw_text) <= 200 else "Resposta não-JSON truncada"
-
-                logger.error(
-                    "Erro no envio - revertendo ultimo_envio | usuario=%s tipo=%s status_code=%s erro=%s",
-                    h.usuario,
-                    h.tipo_envio,
-                    status_code,
-                    error_msg
-                )
-
-                # Reverte ultimo_envio para permitir nova tentativa
-                h.ultimo_envio = ultimo_envio_anterior
-                h.save(update_fields=['ultimo_envio'])
-
-                registrar_log_auditoria({
-                    "funcao": "executar_envio_para_usuario",
-                    "status": "erro_envio_revertido",
-                    "usuario": str(h.usuario),
-                    "tipo_envio": h.tipo_envio,
-                    "status_code": status_code,
-                    "erro": error_msg,
-                    "acao": "ultimo_envio_revertido",
-                    "thread": threading.current_thread().name,
-                })
-
-        except Exception as exc_lock:
-            logger.error(f"Erro ao adquirir lock DB para usuário {h_candidato.usuario}: {exc_lock}", exc_info=exc_lock)
-            registrar_log_auditoria({
-                "funcao": "executar_envio_para_usuario",
-                "status": "erro_lock_db",
-                "usuario": str(h_candidato.usuario),
-                "tipo_envio": h_candidato.tipo_envio,
-                "erro": str(exc_lock),
-                "thread": threading.current_thread().name,
-            })
-
-
-def executar_envios_agendados():
-    """
-    Executa envios agendados com processamento paralelo por usuário.
-
-    Comportamento:
-    - Busca todos os horários elegíveis
-    - Cria uma thread separada para cada usuário elegível
-    - Cada usuário é processado em paralelo (threads diferentes)
-    - Mesmo usuário nunca processa 2x simultaneamente (lock por usuário)
-    - Proteção inter-processo via select_for_update(skip_locked=True)
-
-    Exemplo:
-        Usuario A (12h00) + Usuario B (12h00) → Ambos processam EM PARALELO
-        Usuario A (12h00) + Usuario A (12h01) → Segundo bloqueado até primeiro terminar
-    """
-    agora = timezone.localtime()
-    hora_atual = agora.strftime('%H:%M')
-    hoje = agora.date()
-
-    # Busca horários elegíveis (sem lock ainda)
-    horarios_candidatos = HorarioEnvios.objects.filter(
-        status=True,
-        ativo=True,
-        horario__isnull=False
-    ).filter(
-        Q(ultimo_envio__isnull=True) | Q(ultimo_envio__lt=hoje)
-    )
-
-    threads_criadas = []
-
-    for h_candidato in horarios_candidatos:
-        # Verifica se o horário bate
-        if h_candidato.horario.strftime('%H:%M') != hora_atual:
-            continue
-
-        # Cria thread separada para este usuário (processamento paralelo)
-        thread_name = f"EnvioUsuario-{h_candidato.usuario.id}-{h_candidato.tipo_envio}"
-        t = threading.Thread(
-            target=executar_envio_para_usuario,
-            args=(h_candidato, agora, hoje),
-            name=thread_name,
-            daemon=True
-        )
-        t.start()
-        threads_criadas.append({
-            "thread": t,
-            "usuario": str(h_candidato.usuario),
-            "tipo_envio": h_candidato.tipo_envio,
-        })
-
-        logger.debug(
-            "Thread criada para envio | thread=%s usuario=%s tipo=%s",
-            thread_name,
-            h_candidato.usuario,
-            h_candidato.tipo_envio
-        )
-
-    if threads_criadas:
-        registrar_log_auditoria({
-            "funcao": "executar_envios_agendados",
-            "status": "threads_criadas",
-            "quantidade": len(threads_criadas),
-            "threads": [
-                {"usuario": t["usuario"], "tipo_envio": t["tipo_envio"]}
-                for t in threads_criadas
-            ],
-        })
-
-    # Não aguarda threads terminarem (daemon=True permite execução em background)
-    # O scheduler continuará funcionando e as threads processarão em paralelo
-
-
-def executar_envios_agendados_com_lock():
-    """
-    Entry point para execução de envios agendados.
-
-    Nota: O lock global foi REMOVIDO para permitir processamento paralelo.
-    Agora usa locks POR USUÁRIO, permitindo que diferentes usuários sejam
-    processados simultaneamente.
-    """
-    try:
-        executar_envios_agendados()
-    except Exception as exc:
-        logger.exception(f"Erro em executar_envios_agendados_com_lock: {exc}")
-
-
-##############################################################################################
-##### FUNÇÃO PARA EXECUTAR O SCRIPT DE BACKUP DO "DB.SQLITE3" PARA O DIRETÓRIO DO DRIVE. #####
-##############################################################################################
-
-def backup_db_sh():
-    """
-    Executa o script 'backup_db.sh' para realizar backup do banco SQLite.
-    """
-    # Caminho para o script de backup
-    caminho_arquivo_sh = 'backup_db.sh'
-
-    # Executar o script de backup
-    resultado = subprocess.run(['sh', caminho_arquivo_sh], capture_output=True, text=True)
-
-    # Verificar o resultado da execução do script
-    if resultado.returncode == 0:
-        logger.info("Backup do DB realizado com sucesso")
-    else:
-        logger.error(
-            "Falha durante backup do DB | returncode=%d stderr=%s",
-            resultado.returncode,
-            resultado.stderr
-        )
-
-    time.sleep(random.randint(10, 20))
-##### FIM #####
+                fi
+
+                log_debug "[ETAPA 3] Sessão: $SESSION_NAME | Token: ${TOKEN:0:20}..."
+
+                # check_session popula os arrays diretamente
+                if ! check_session "$SESSION_NAME" "$TOKEN"; then
+                    SESSION_HAS_DIVERGENCE=true
+                    # Salvar nome da sessão com problema para notificação de rebuild
+                    echo "$SESSION_NAME" >> /tmp/wppconnect_divergent_sessions
+                fi
+            done <<< "$SESSIONS_DATA"
+        fi
+    fi
+fi
+
+# Resumo usando os arrays populados por check_session
+TOTAL_CHECKED=$((${#SESSIONS_CONNECTED[@]} + ${#SESSIONS_DISCONNECTED[@]} + ${#SESSIONS_DIVERGENT[@]} + ${#SESSIONS_ERROR[@]}))
+log_debug "[ETAPA 3] Resumo: $TOTAL_CHECKED sessões verificadas"
+log_debug "[ETAPA 3]   - Conectadas: ${#SESSIONS_CONNECTED[@]} (${SESSIONS_CONNECTED[*]:-nenhuma})"
+log_debug "[ETAPA 3]   - Desconectadas: ${#SESSIONS_DISCONNECTED[@]} (${SESSIONS_DISCONNECTED[*]:-nenhuma})"
+log_debug "[ETAPA 3]   - Divergentes: ${#SESSIONS_DIVERGENT[@]} (${SESSIONS_DIVERGENT[*]:-nenhuma})"
+log_debug "[ETAPA 3]   - Com erro: ${#SESSIONS_ERROR[@]} (${SESSIONS_ERROR[*]:-nenhuma})"
+
+# Etapa 4: Avaliar resultados e tomar ação
+log_debug "[ETAPA 4] Avaliando resultados..."
+
+CURRENT_DIVERGENCE=$(cat "$DIVERGENCE_FILE" 2>/dev/null || echo "0")
+log_debug "[ETAPA 4] Contador atual de divergências: $CURRENT_DIVERGENCE"
+
+# Verificar se houve divergências (usando o array)
+DIVERGENT_COUNT=${#SESSIONS_DIVERGENT[@]}
+
+if [ "$DIVERGENT_COUNT" -gt 0 ]; then
+    DIVERGENCE_COUNT=$((CURRENT_DIVERGENCE + 1))
+    echo "$DIVERGENCE_COUNT" > "$DIVERGENCE_FILE"
+
+    log_debug "[ETAPA 4] PROBLEMA: Divergência detectada em $DIVERGENT_COUNT sessão(ões): ${SESSIONS_DIVERGENT[*]}"
+    log_debug "[ETAPA 4] Contador atualizado: $DIVERGENCE_COUNT/$DIVERGENCE_THRESHOLD"
+
+    if [ "$DIVERGENCE_COUNT" -ge "$DIVERGENCE_THRESHOLD" ]; then
+        log_debug "[ETAPA 4] AÇÃO: Threshold atingido ($DIVERGENCE_COUNT >= $DIVERGENCE_THRESHOLD)"
+        log_debug "[ETAPA 4] Iniciando REBUILD completo do container..."
+        rebuild_container
+        echo "0" > "$DIVERGENCE_FILE"
+        log_debug "[ETAPA 4] Contador de divergências resetado para 0"
+    else
+        log_debug "[ETAPA 4] AGUARDANDO: Divergência $DIVERGENCE_COUNT de $DIVERGENCE_THRESHOLD"
+        log_debug "[ETAPA 4] Rebuild será executado após $((DIVERGENCE_THRESHOLD - DIVERGENCE_COUNT)) verificação(ões) com problema"
+    fi
+else
+    if [ "$CURRENT_DIVERGENCE" != "0" ]; then
+        log_debug "[ETAPA 4] RECUPERADO: Sistema voltou ao normal"
+        log_debug "[ETAPA 4] Contador anterior: $CURRENT_DIVERGENCE -> resetando para 0"
+    else
+        log_debug "[ETAPA 4] OK: Nenhuma divergência detectada"
+    fi
+    echo "0" > "$DIVERGENCE_FILE"
+fi
+
+# Finalização - Log de debug
+log_debug "[MONITOR] =========================================="
+log_debug "[MONITOR] Verificação concluída - Ciclo #$CYCLE_NUMBER"
+log_debug "[MONITOR] Status final:"
+log_debug "[MONITOR]   - Container: $CONTAINER_STATUS_TEXT"
+log_debug "[MONITOR]   - API: $API_STATUS_TEXT"
+log_debug "[MONITOR]   - Sessões conectadas: ${#SESSIONS_CONNECTED[@]}"
+log_debug "[MONITOR]   - Sessões desconectadas: ${#SESSIONS_DISCONNECTED[@]}"
+log_debug "[MONITOR]   - Sessões divergentes: ${#SESSIONS_DIVERGENT[@]}"
+log_debug "[MONITOR]   - Sessões com erro: ${#SESSIONS_ERROR[@]}"
+log_debug "[MONITOR]   - Contador divergências: $(cat "$DIVERGENCE_FILE" 2>/dev/null || echo "0")/$DIVERGENCE_THRESHOLD"
+log_debug "[MONITOR] =========================================="
+
+# Escrever resultado estruturado no log de monitoramento
+write_monitor_result "$CYCLE_NUMBER"
+
+log_separator

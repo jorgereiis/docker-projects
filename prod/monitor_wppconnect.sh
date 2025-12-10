@@ -4,18 +4,28 @@
 # Localização no servidor: /Docker/ubuntu/monitor_wppconnect.sh
 #
 # Lógica de verificação:
-# 1. Container não UP → docker restart (solução rápida)
-# 2. API não retorna 200 → docker restart (solução rápida)
+# 1. Container não existe ou não está Running → docker restart
+# 2. API não responde → apenas alerta (sem restart automático)
+#    - O problema pode ser externo (Cloudflare, DNS, rede)
 # 3. Divergência status-session vs check-connection → rebuild completo
-#    (detecta problema de detached frame no Puppeteer)
+#    - Detecta problema de 'detached frame' no Puppeteer
+#    - Requer 3 divergências consecutivas antes do rebuild
 #
 # Obtenção de tokens:
 # - Os tokens das sessões são obtidos do banco SQLite do Django
 # - Tabela: cadastros_sessaowpp (campos: usuario, token, is_active)
-# - Configure DB_PATH abaixo com o caminho correto do banco
+#
+# Funcionalidades de confiabilidade:
+# - Lock de execução para evitar execuções simultâneas
+# - Fallback para API local (IP do container) quando API externa falha
+# - Cooldown após rebuild (2h) para evitar loops destrutivos
+# - Rate limiting de notificações com detecção de problemas persistentes
+# - Health check robusto do container (Running + API respondendo)
+# - Rotação automática de logs e arquivos de diagnóstico
+# - Persistência de estado em disco (sobrevive a reboots)
 #
 # Pré-requisitos:
-# - sqlite3 instalado (apt-get install sqlite3)
+# - docker, curl, sqlite3, flock
 # - Acesso de leitura ao banco de dados Django
 #
 # Uso:
@@ -24,6 +34,45 @@
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# =============================================================================
+# VERIFICAÇÃO DE DEPENDÊNCIAS
+# =============================================================================
+check_dependencies() {
+    local missing=()
+    for cmd in docker curl sqlite3 flock; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERRO: Dependências não encontradas: ${missing[*]}"
+        echo "Instale com: apt-get install ${missing[*]}"
+        exit 1
+    fi
+}
+check_dependencies
+
+# =============================================================================
+# LOCK DE EXECUÇÃO - Evita execuções simultâneas
+# =============================================================================
+LOCK_FILE="/tmp/monitor_wppconnect.lock"
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Script já em execução. Abortando."
+    exit 1
+fi
+
+# =============================================================================
+# TRAP PARA LIMPEZA DE ARQUIVOS TEMPORÁRIOS
+# =============================================================================
+TEMP_FILES_TO_CLEAN=()
+cleanup() {
+    for file in "${TEMP_FILES_TO_CLEAN[@]}"; do
+        rm -f "$file" 2>/dev/null
+    done
+}
+trap cleanup EXIT
 
 # =============================================================================
 # CONFIGURAÇÃO DE LOGS DUAL
@@ -35,13 +84,28 @@ DEBUG_LOG="${SCRIPT_DIR}/logs/wppconnect_debug.log"
 MONITOR_LOG="${SCRIPT_DIR}/logs/wppconnect_monitor.log"
 INCIDENT_LOG="${SCRIPT_DIR}/logs/wppconnect_incidents.log"
 
-# Arquivos de controle
-DIVERGENCE_FILE="/tmp/wppconnect_divergence_count"
-CYCLE_COUNT_FILE="/tmp/wppconnect_cycle_count"
+# Arquivos de controle (persistentes - sobrevivem a reboots)
+STATE_DIR="${SCRIPT_DIR}/logs/state"
+mkdir -p "$STATE_DIR"
+DIVERGENCE_FILE="${STATE_DIR}/divergence_count"
+CYCLE_COUNT_FILE="${STATE_DIR}/cycle_count"
+LAST_REBUILD_FILE="${STATE_DIR}/last_rebuild_timestamp"
+LAST_RESTART_FILE="${STATE_DIR}/last_restart_timestamp"
+LAST_NOTIFICATION_FILE="${STATE_DIR}/last_notification"
+LAST_PROBLEM_HASH_FILE="${STATE_DIR}/last_problem_hash"
 
 # Configurações da API
-API_URL="http://api.nossopainel.com.br/api"
-DIVERGENCE_THRESHOLD=3  # Divergências consecutivas antes de rebuild
+API_URL_EXTERNAL="http://api.nossopainel.com.br/api"
+API_URL_INTERNAL=""  # Será preenchido dinamicamente com IP do container
+CONTAINER_NAME="wppconnect-server"
+CONTAINER_PORT="21465"
+API_URL=""  # URL efetiva (será definida após detectar IP)
+
+# Configurações de comportamento
+DIVERGENCE_THRESHOLD=3      # Divergências consecutivas antes de rebuild
+REBUILD_COOLDOWN=7200       # Cooldown após rebuild: 2 horas (em segundos)
+RESTART_COOLDOWN=300        # Cooldown após restart: 5 minutos (em segundos)
+NOTIFICATION_COOLDOWN=1800  # Cooldown entre notificações do mesmo problema: 30 min
 
 # Caminho do banco de dados SQLite do Django (onde os tokens estão armazenados)
 DB_PATH="${SCRIPT_DIR}/nossopainel-django/database/db.sqlite3"
@@ -238,6 +302,124 @@ bool_to_text() {
     fi
 }
 
+# Obter timestamp atual em segundos (epoch)
+get_timestamp() {
+    date +%s
+}
+
+# Verificar se está em período de cooldown
+# Uso: is_in_cooldown "arquivo_timestamp" "segundos_cooldown"
+# Retorna: 0 = em cooldown, 1 = fora do cooldown
+is_in_cooldown() {
+    local timestamp_file="$1"
+    local cooldown_seconds="$2"
+
+    if [[ ! -f "$timestamp_file" ]]; then
+        return 1  # Arquivo não existe = fora do cooldown
+    fi
+
+    local last_timestamp=$(cat "$timestamp_file" 2>/dev/null || echo "0")
+    local current_timestamp=$(get_timestamp)
+    local elapsed=$((current_timestamp - last_timestamp))
+
+    if [[ $elapsed -lt $cooldown_seconds ]]; then
+        local remaining=$((cooldown_seconds - elapsed))
+        log_debug "[COOLDOWN] Em cooldown. Restam $((remaining / 60)) minutos"
+        return 0  # Em cooldown
+    fi
+
+    return 1  # Fora do cooldown
+}
+
+# Registrar timestamp de uma ação (para cooldown)
+set_cooldown_timestamp() {
+    local timestamp_file="$1"
+    get_timestamp > "$timestamp_file"
+}
+
+# Gerar hash de um problema (para detectar problemas persistentes)
+generate_problem_hash() {
+    local problem_type="$1"
+    local problem_details="$2"
+    echo "${problem_type}:${problem_details}" | md5sum | cut -d' ' -f1
+}
+
+# Verificar se é o mesmo problema da última notificação
+# Retorna: 0 = mesmo problema, 1 = problema diferente
+is_same_problem() {
+    local current_hash="$1"
+
+    if [[ ! -f "$LAST_PROBLEM_HASH_FILE" ]]; then
+        return 1  # Não há problema anterior
+    fi
+
+    local last_hash=$(cat "$LAST_PROBLEM_HASH_FILE" 2>/dev/null)
+    if [[ "$current_hash" == "$last_hash" ]]; then
+        return 0  # Mesmo problema
+    fi
+
+    return 1  # Problema diferente
+}
+
+# Obter contagem de ocorrências do mesmo problema
+get_problem_occurrence_count() {
+    local occurrence_file="${STATE_DIR}/problem_occurrence_count"
+    cat "$occurrence_file" 2>/dev/null || echo "0"
+}
+
+# Incrementar contagem de ocorrências do mesmo problema
+increment_problem_occurrence() {
+    local occurrence_file="${STATE_DIR}/problem_occurrence_count"
+    local current=$(get_problem_occurrence_count)
+    echo $((current + 1)) > "$occurrence_file"
+}
+
+# Resetar contagem de ocorrências (quando problema muda ou é resolvido)
+reset_problem_occurrence() {
+    local occurrence_file="${STATE_DIR}/problem_occurrence_count"
+    echo "0" > "$occurrence_file"
+    rm -f "$LAST_PROBLEM_HASH_FILE" 2>/dev/null
+}
+
+# Descobrir IP interno do container na rede Docker
+get_container_internal_ip() {
+    local container="$1"
+    local ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container" 2>/dev/null)
+    echo "$ip"
+}
+
+# Configurar URL da API (tenta local primeiro, depois externa)
+setup_api_url() {
+    log_debug "[API] Configurando URL da API..."
+
+    # Tentar obter IP interno do container
+    local container_ip=$(get_container_internal_ip "$CONTAINER_NAME")
+
+    if [[ -n "$container_ip" ]]; then
+        API_URL_INTERNAL="http://${container_ip}:${CONTAINER_PORT}/api"
+        log_debug "[API] IP interno do container: $container_ip"
+        log_debug "[API] URL interna configurada: $API_URL_INTERNAL"
+
+        # Testar se API interna responde
+        local internal_check=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${API_URL_INTERNAL}/" 2>/dev/null)
+
+        if [[ "$internal_check" != "000" ]] && [[ -n "$internal_check" ]]; then
+            API_URL="$API_URL_INTERNAL"
+            log_debug "[API] Usando API INTERNA (HTTP $internal_check): $API_URL"
+            return 0
+        else
+            log_debug "[API] API interna não respondeu (HTTP $internal_check)"
+        fi
+    else
+        log_debug "[API] Não foi possível obter IP interno do container"
+    fi
+
+    # Fallback para URL externa
+    API_URL="$API_URL_EXTERNAL"
+    log_debug "[API] Usando API EXTERNA (fallback): $API_URL"
+    return 0
+}
+
 # Obter número do ciclo atual
 get_cycle_number() {
     local cycle=$(cat "$CYCLE_COUNT_FILE" 2>/dev/null || echo "0")
@@ -267,7 +449,7 @@ is_cloudflare_error() {
     local status_code="$2"
 
     # HTTP 520-527 são erros específicos Cloudflare
-    if [[ "$status_code" =~ ^5[2][0-7]$ ]]; then
+    if [[ "$status_code" =~ ^52[0-7]$ ]]; then
         return 0
     fi
 
@@ -393,8 +575,25 @@ rotate_monitor_log() {
     fi
 }
 
+# Rotação de arquivos de diagnóstico (manter últimos 7 dias, max 50 arquivos)
+rotate_diagnostic_files() {
+    local diag_dir="${SCRIPT_DIR}/logs"
+    if [[ -d "$diag_dir" ]]; then
+        # Remover arquivos de diagnóstico com mais de 7 dias
+        find "$diag_dir" -name "diagnostic_*.log" -mtime +7 -delete 2>/dev/null
+        # Manter apenas os 50 mais recentes
+        local count=$(find "$diag_dir" -name "diagnostic_*.log" 2>/dev/null | wc -l)
+        if [[ $count -gt 50 ]]; then
+            find "$diag_dir" -name "diagnostic_*.log" -printf '%T@ %p\n' 2>/dev/null | \
+                sort -n | head -n $((count - 50)) | cut -d' ' -f2- | xargs -r rm -f
+            log_debug "Arquivos de diagnóstico rotacionados: removidos $((count - 50)) arquivos antigos"
+        fi
+    fi
+}
+
 # Função para enviar notificação WhatsApp após rebuild ou alerta
 # RESULTADO: "sucesso", "falha", "alerta", ou "restart"
+# Inclui rate limiting e detecção de problemas persistentes
 send_notification() {
     local RESULTADO="$1"  # "sucesso", "falha", "alerta", ou "restart"
     local MOTIVO="$2"     # Descrição do motivo
@@ -403,6 +602,32 @@ send_notification() {
     log "[NOTIFY] =========================================="
     log "[NOTIFY] Preparando notificação WhatsApp..."
 
+    # Gerar hash do problema atual para detectar persistência
+    local problem_hash=$(generate_problem_hash "$RESULTADO" "$MOTIVO")
+    local is_persistent=false
+    local occurrence_count=1
+
+    # Verificar se é o mesmo problema da última notificação
+    if is_same_problem "$problem_hash"; then
+        increment_problem_occurrence
+        occurrence_count=$(get_problem_occurrence_count)
+        is_persistent=true
+        log "[NOTIFY] Problema PERSISTENTE detectado (ocorrência #$occurrence_count)"
+
+        # Verificar cooldown de notificações para o mesmo problema
+        if is_in_cooldown "$LAST_NOTIFICATION_FILE" "$NOTIFICATION_COOLDOWN"; then
+            log "[NOTIFY] Em cooldown de notificação. Pulando envio."
+            log "[NOTIFY] =========================================="
+            return 0
+        fi
+    else
+        # Problema novo - resetar contagem
+        reset_problem_occurrence
+        increment_problem_occurrence
+        echo "$problem_hash" > "$LAST_PROBLEM_HASH_FILE"
+        log "[NOTIFY] Novo problema detectado"
+    fi
+
     # Carregar variáveis do .env do Django
     DJANGO_ENV="${SCRIPT_DIR}/nossopainel-django/.env"
     if [ ! -f "$DJANGO_ENV" ]; then
@@ -410,12 +635,19 @@ send_notification() {
         return 1
     fi
 
-    # Extrair MEU_NUM_TIM e URL_API_WPP do .env
-    TELEFONE_ADMIN=$(grep -E "^MEU_NUM_TIM" "$DJANGO_ENV" | cut -d'"' -f2)
-    API_URL_WPP=$(grep -E "^URL_API_WPP" "$DJANGO_ENV" | cut -d"'" -f2)
+    # Extrair MEU_NUM_TIM e URL_API_WPP do .env (suporta aspas simples, duplas ou sem aspas)
+    TELEFONE_ADMIN=$(grep -E "^MEU_NUM_TIM" "$DJANGO_ENV" | sed -E "s/^[^=]+=[ ]*['\"]?([^'\"]+)['\"]?.*$/\1/" | tr -d '[:space:]')
+    API_URL_WPP=$(grep -E "^URL_API_WPP" "$DJANGO_ENV" | sed -E "s/^[^=]+=[ ]*['\"]?([^'\"]+)['\"]?.*$/\1/" | tr -d '[:space:]')
 
     if [ -z "$TELEFONE_ADMIN" ]; then
         log "[NOTIFY] ERRO: MEU_NUM_TIM não encontrado no .env"
+        log "[NOTIFY] Verifique se a variável está definida no formato: MEU_NUM_TIM=\"valor\" ou MEU_NUM_TIM='valor'"
+        return 1
+    fi
+
+    if [ -z "$API_URL_WPP" ]; then
+        log "[NOTIFY] ERRO: URL_API_WPP não encontrado no .env"
+        log "[NOTIFY] Verifique se a variável está definida no formato: URL_API_WPP=\"valor\" ou URL_API_WPP='valor'"
         return 1
     fi
 
@@ -515,13 +747,23 @@ send_notification() {
 ⚠️ *Sessões com problema:* $SESSOES_FORMATADAS"
     fi
 
+    # Seção de problema persistente (se aplicável)
+    local PERSISTENT_SECTION=""
+    if [[ "$is_persistent" == "true" ]] && [[ $occurrence_count -gt 1 ]]; then
+        PERSISTENT_SECTION="
+
+🔁 *PROBLEMA PERSISTENTE*
+Este é o mesmo problema notificado anteriormente.
+Ocorrência #$occurrence_count - O problema ainda não foi resolvido."
+    fi
+
     # Montar mensagem (usando heredoc para preservar formatação)
     local MENSAGEM=$(cat <<EOF
 🔧 *WPPCONNECT - $TITULO*
 
 $EMOJI *$STATUS_MSG*
 
-📅 *Data/Hora:* $TIMESTAMP$SESSOES_SECTION
+📅 *Data/Hora:* $TIMESTAMP$SESSOES_SECTION$PERSISTENT_SECTION
 
 📋 *Motivo:*
 $MOTIVO
@@ -549,6 +791,8 @@ EOF
 
     if echo "$SEND_RESP" | grep -qE '"status"\s*:\s*(true|"success")'; then
         log "[NOTIFY] SUCESSO: Notificação enviada para $TELEFONE_ADMIN"
+        # Registrar timestamp da notificação para rate limiting
+        set_cooldown_timestamp "$LAST_NOTIFICATION_FILE"
         log "[NOTIFY] =========================================="
         return 0
     else
@@ -558,10 +802,31 @@ EOF
     fi
 }
 
+# Função para resetar estado de problema quando tudo está OK
+# Chamar quando ciclo termina sem problemas
+clear_problem_state() {
+    if [[ -f "$LAST_PROBLEM_HASH_FILE" ]]; then
+        log_debug "[STATE] Sistema normalizado - resetando estado de problema"
+        reset_problem_occurrence
+    fi
+}
+
 # Função para reiniciar container (solução rápida)
+# Parâmetro opcional: $1 = motivo do restart (para notificação)
+# Retorna: 0 = sucesso, 1 = falha, 2 = em cooldown (não executou)
 restart_container() {
+    local RESTART_MOTIVO="${1:-Container não estava rodando ou não existia}"
+
     log_debug "[RESTART] =========================================="
     log_debug "[RESTART] Iniciando reinicialização do container..."
+    log_debug "[RESTART] Motivo: $RESTART_MOTIVO"
+
+    # Verificar cooldown de restart
+    if is_in_cooldown "$LAST_RESTART_FILE" "$RESTART_COOLDOWN"; then
+        log_debug "[RESTART] Em período de cooldown. Restart não será executado."
+        log_debug "[RESTART] =========================================="
+        return 2
+    fi
 
     # =========================================================================
     # CAPTURAR LOGS E MÉTRICAS ANTES DO RESTART
@@ -600,6 +865,8 @@ restart_container() {
 
     if [ $RESULT -eq 0 ]; then
         FLAG_CONTAINER_RESTARTED=true
+        # Registrar timestamp para cooldown
+        set_cooldown_timestamp "$LAST_RESTART_FILE"
         log_debug "[RESTART] Container reiniciado com sucesso (exit code: 0)"
         log_debug "[RESTART] Aguardando 30 segundos para inicialização..."
         sleep 30
@@ -614,21 +881,32 @@ restart_container() {
             API_STATUS_TEXT="OK (HTTP $API_CHECK) - Pós-restart"
 
             # Registrar incidente de restart bem-sucedido
-            log_incident "RESTART EXECUTADO" "Container reiniciado devido a erro de API.
+            log_incident "RESTART EXECUTADO" "Container reiniciado devido a: $RESTART_MOTIVO
 API pós-restart: HTTP $API_CHECK"
+
+            # Enviar notificação WhatsApp de restart bem-sucedido
+            send_notification "restart" "$RESTART_MOTIVO. API respondendo normalmente (HTTP $API_CHECK)." ""
         else
             log_debug "[RESTART] ALERTA: Container reiniciado mas API não responde (HTTP: $API_CHECK)"
             API_STATUS_TEXT="FALHA (HTTP $API_CHECK) - Pós-restart"
 
             # Registrar incidente de restart com falha
             log_incident "RESTART COM FALHA" "Container reiniciado mas API ainda não responde.
+Motivo original: $RESTART_MOTIVO
 API pós-restart: HTTP $API_CHECK"
+
+            # Enviar notificação WhatsApp de falha
+            send_notification "alerta" "$RESTART_MOTIVO. Container foi reiniciado mas API não está respondendo (HTTP $API_CHECK). Verificação manual pode ser necessária." ""
         fi
     else
         log_debug "[RESTART] ERRO: Falha ao reiniciar container (exit code: $RESULT)"
 
         # Registrar incidente de falha no restart
-        log_incident "FALHA NO RESTART" "Comando docker restart falhou com exit code: $RESULT"
+        log_incident "FALHA NO RESTART" "Comando docker restart falhou com exit code: $RESULT
+Motivo original: $RESTART_MOTIVO"
+
+        # Enviar notificação WhatsApp de falha crítica
+        send_notification "falha" "Falha ao reiniciar container (exit code: $RESULT). Motivo: $RESTART_MOTIVO. Verificação manual necessária." ""
     fi
 
     log_debug "[RESTART] =========================================="
@@ -636,12 +914,24 @@ API pós-restart: HTTP $API_CHECK"
 }
 
 # Função para fazer rebuild completo (problema de detached frame)
+# Retorna: 0 = sucesso, 1 = falha, 2 = em cooldown (não executou)
 rebuild_container() {
     log_debug "[REBUILD] =========================================="
     log_debug "[REBUILD] Iniciando rebuild completo do container..."
     log_debug "[REBUILD] Motivo: Divergência detectada entre status-session e check-connection"
     log_debug "[REBUILD] Isso geralmente indica problema de 'detached frame' no Puppeteer"
     log_debug "[REBUILD] =========================================="
+
+    # Verificar cooldown de rebuild
+    if is_in_cooldown "$LAST_REBUILD_FILE" "$REBUILD_COOLDOWN"; then
+        local remaining=$(( REBUILD_COOLDOWN - ($(get_timestamp) - $(cat "$LAST_REBUILD_FILE" 2>/dev/null || echo "0")) ))
+        log_debug "[REBUILD] Em período de cooldown. Rebuild não será executado."
+        log_debug "[REBUILD] Tempo restante: $((remaining / 60)) minutos"
+        log_debug "[REBUILD] =========================================="
+        # Enviar alerta sobre cooldown
+        send_notification "alerta" "Divergência detectada mas rebuild está em cooldown (restam $((remaining / 60)) minutos). Um rebuild foi executado recentemente." ""
+        return 2
+    fi
 
     FLAG_CONTAINER_REBUILT=true
 
@@ -662,23 +952,37 @@ rebuild_container() {
     cd "$COMPOSE_DIR" || { log_debug "[REBUILD] ERRO: Não foi possível acessar $COMPOSE_DIR"; return 1; }
     log_debug "[REBUILD] Diretório de trabalho: $(pwd)"
 
-    # Parar container
+    # Parar container (com timeout de 60 segundos)
     log_debug "[REBUILD] Etapa 1/4: Parando container..."
-    log_debug "[REBUILD] Comando: docker stop wppconnect-server"
-    docker stop wppconnect-server 2>&1 | while read line; do log_debug "[REBUILD][STOP] $line"; done
+    log_debug "[REBUILD] Comando: timeout 60 docker stop wppconnect-server"
+    if ! timeout 60 docker stop wppconnect-server 2>&1 | while read line; do log_debug "[REBUILD][STOP] $line"; done; then
+        log_debug "[REBUILD] AVISO: docker stop atingiu timeout, forçando com kill..."
+        docker kill wppconnect-server 2>/dev/null
+    fi
     log_debug "[REBUILD] Container parado"
 
-    # Remover container
+    # Remover container (com timeout de 30 segundos)
     log_debug "[REBUILD] Etapa 2/4: Removendo container..."
-    log_debug "[REBUILD] Comando: docker rm wppconnect-server"
-    docker rm wppconnect-server 2>&1 | while read line; do log_debug "[REBUILD][RM] $line"; done
+    log_debug "[REBUILD] Comando: timeout 30 docker rm wppconnect-server"
+    if ! timeout 30 docker rm wppconnect-server 2>&1 | while read line; do log_debug "[REBUILD][RM] $line"; done; then
+        log_debug "[REBUILD] AVISO: docker rm atingiu timeout, forçando..."
+        docker rm -f wppconnect-server 2>/dev/null
+    fi
     log_debug "[REBUILD] Container removido"
 
-    # Rebuild da imagem
+    # Rebuild da imagem (com timeout de 10 minutos)
     log_debug "[REBUILD] Etapa 3/4: Reconstruindo imagem..."
-    log_debug "[REBUILD] Comando: docker compose -f wppconnect-build.yml build"
-    log_debug "[REBUILD] Isso pode demorar alguns minutos..."
-    docker compose -f wppconnect-build.yml build 2>&1 | while read line; do log_debug "[REBUILD][BUILD] $line"; done
+    log_debug "[REBUILD] Comando: timeout 600 docker compose -f wppconnect-build.yml build"
+    log_debug "[REBUILD] Isso pode demorar alguns minutos (timeout: 10 min)..."
+    if ! timeout 600 docker compose -f wppconnect-build.yml build 2>&1 | while read line; do log_debug "[REBUILD][BUILD] $line"; done; then
+        local BUILD_EXIT=$?
+        if [ $BUILD_EXIT -eq 124 ]; then
+            log_debug "[REBUILD] ERRO: Timeout de 10 minutos atingido durante o build"
+            log_incident "BUILD TIMEOUT" "O comando docker compose build excedeu o timeout de 10 minutos e foi cancelado."
+            send_notification "falha" "O rebuild do container falhou por timeout (10 minutos). Verificação manual necessária." ""
+            return 1
+        fi
+    fi
     log_debug "[REBUILD] Build concluído"
 
     # Subir container
@@ -700,6 +1004,10 @@ rebuild_container() {
     if [ "$API_CHECK" != "000" ] && [ "$API_CHECK" -lt 500 ] 2>/dev/null; then
         log_debug "[REBUILD] SUCESSO: Rebuild concluído - API respondendo (HTTP $API_CHECK)"
         API_STATUS_TEXT="OK (HTTP $API_CHECK) - Pós-rebuild"
+
+        # Registrar timestamp para cooldown
+        set_cooldown_timestamp "$LAST_REBUILD_FILE"
+        log_debug "[REBUILD] Cooldown de rebuild iniciado (${REBUILD_COOLDOWN}s = $((REBUILD_COOLDOWN / 3600))h)"
 
         # Aguardar mais 30s para sessões reconectarem antes de enviar notificação
         log_debug "[REBUILD] Aguardando 30 segundos para sessões reconectarem..."
@@ -833,20 +1141,26 @@ check_session() {
 CYCLE_NUMBER=$(get_cycle_number)
 reset_cycle_state
 
-# Rotacionar logs se necessário
+# Rotacionar logs e arquivos de diagnóstico se necessário
 rotate_debug_log
 rotate_monitor_log
+rotate_diagnostic_files
 
 log_separator
 log_debug "[MONITOR] =========================================="
 log_debug "[MONITOR] Iniciando verificação do WPPCONNECT - Ciclo #$CYCLE_NUMBER"
 log_debug "[MONITOR] Script: $0"
 log_debug "[MONITOR] Diretório: $SCRIPT_DIR"
-log_debug "[MONITOR] API URL: $API_URL"
 log_debug "[MONITOR] Threshold divergências: $DIVERGENCE_THRESHOLD"
+log_debug "[MONITOR] Cooldown rebuild: ${REBUILD_COOLDOWN}s ($((REBUILD_COOLDOWN / 3600))h)"
+log_debug "[MONITOR] Cooldown restart: ${RESTART_COOLDOWN}s ($((RESTART_COOLDOWN / 60))min)"
 log_debug "[MONITOR] =========================================="
 
-# Etapa 1: Verificar se container está rodando
+# Etapa 0: Configurar URL da API (tenta local primeiro)
+setup_api_url
+log_debug "[MONITOR] API URL configurada: $API_URL"
+
+# Etapa 1: Verificar se container está rodando (health check robusto)
 log_debug "[ETAPA 1] Verificando status do container..."
 log_debug "[ETAPA 1] Comando: docker inspect -f '{{.State.Running}}' wppconnect-server"
 
@@ -857,7 +1171,7 @@ if [ $CONTAINER_EXISTS -ne 0 ]; then
     CONTAINER_STATUS_TEXT="NÃO EXISTE"
     log_debug "[ETAPA 1] ERRO: Container wppconnect-server não existe"
     log_debug "[ETAPA 1] Ação: Tentando reiniciar..."
-    restart_container
+    restart_container "Container wppconnect-server não existia no sistema"
     echo "0" > "$DIVERGENCE_FILE"
     log_debug "[MONITOR] Verificação encerrada (container não existia)"
     write_monitor_result "$CYCLE_NUMBER"
@@ -871,7 +1185,7 @@ if [ "$CONTAINER_RUNNING" != "true" ]; then
     CONTAINER_STATUS_TEXT="PARADO"
     log_debug "[ETAPA 1] PROBLEMA: Container não está rodando (Running=$CONTAINER_RUNNING)"
     log_debug "[ETAPA 1] Ação: Reiniciando container..."
-    restart_container
+    restart_container "Container estava parado (Running=$CONTAINER_RUNNING)"
     echo "0" > "$DIVERGENCE_FILE"
     log_debug "[MONITOR] Verificação encerrada (container reiniciado)"
     write_monitor_result "$CYCLE_NUMBER"
@@ -882,28 +1196,29 @@ fi
 CONTAINER_STATUS_TEXT="RUNNING ✓"
 log_debug "[ETAPA 1] OK: Container está rodando"
 
-# Etapa 2: Verificar se API responde (com retry)
+# Etapa 2: Verificar se API responde (com retry e backoff exponencial)
 log_debug "[ETAPA 2] Verificando se API responde..."
 log_debug "[ETAPA 2] URL: ${API_URL}/"
 log_debug "[ETAPA 2] Timeout: 10 segundos por tentativa"
-log_debug "[ETAPA 2] Máximo de tentativas: 3"
+log_debug "[ETAPA 2] Máximo de tentativas: 3 (com backoff exponencial)"
 
-# Configuração de retry
+# Configuração de retry com backoff exponencial
 MAX_RETRIES=3
-RETRY_INTERVAL=5
+BASE_RETRY_INTERVAL=2  # Intervalo base em segundos (2, 4, 8...)
 RETRY_COUNT=0
 API_IS_DOWN=false
 API_HTTP_CODE=""
 API_BODY=""
 API_HEADERS=""
 
-# Loop de retry para evitar restart por erro transiente
+# Loop de retry com backoff exponencial para evitar falsos positivos
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     RETRY_COUNT=$((RETRY_COUNT + 1))
     log_debug "[ETAPA 2] Tentativa $RETRY_COUNT/$MAX_RETRIES..."
 
     # Capturar resposta completa com headers usando arquivo temporário
     TEMP_HEADERS=$(mktemp)
+    TEMP_FILES_TO_CLEAN+=("$TEMP_HEADERS")  # Adicionar à lista de cleanup
     API_BODY=$(curl -s -D "$TEMP_HEADERS" -w "\n%{http_code}" --max-time 10 "${API_URL}/" 2>/dev/null)
     API_HTTP_CODE="${API_BODY##*$'\n'}"
     API_BODY="${API_BODY%$'\n'*}"
@@ -918,11 +1233,13 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         break
     fi
 
-    # Se ainda há tentativas, aguardar antes de retry
+    # Se ainda há tentativas, aguardar com backoff exponencial antes de retry
     if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+        # Backoff exponencial: 2^(tentativa-1) * base = 2, 4, 8 segundos
+        BACKOFF_INTERVAL=$((BASE_RETRY_INTERVAL * (1 << (RETRY_COUNT - 1))))
         log_debug "[ETAPA 2] Tentativa $RETRY_COUNT falhou (HTTP $API_HTTP_CODE)"
-        log_debug "[ETAPA 2] Aguardando ${RETRY_INTERVAL}s antes da próxima tentativa..."
-        sleep $RETRY_INTERVAL
+        log_debug "[ETAPA 2] Aguardando ${BACKOFF_INTERVAL}s antes da próxima tentativa (backoff exponencial)..."
+        sleep $BACKOFF_INTERVAL
     fi
 done
 
@@ -991,10 +1308,24 @@ elif [ -z "$API_HTTP_CODE" ]; then
 fi
 
 if [ "$API_IS_DOWN" = true ]; then
-    log_debug "[ETAPA 2] Ação: Reiniciando container..."
-    restart_container
-    echo "0" > "$DIVERGENCE_FILE"
-    log_debug "[MONITOR] Verificação encerrada (API não respondia após $RETRY_COUNT tentativas)"
+    # NOTA: Não reiniciar automaticamente quando API não responde
+    # O problema pode ser externo (Cloudflare, DNS, rede) e não do container
+    # Apenas registrar o incidente e enviar alerta
+    log_debug "[ETAPA 2] API não está respondendo - NÃO será feito restart automático"
+    log_debug "[ETAPA 2] Motivo: O problema pode ser externo (Cloudflare, DNS, rede)"
+    log_debug "[ETAPA 2] Ação: Registrar incidente e enviar alerta para verificação manual"
+
+    # Registrar incidente
+    log_incident "API NÃO RESPONDE" "A API não respondeu após $RETRY_COUNT tentativas.
+HTTP Code: $API_HTTP_CODE
+Cloudflare Error: $(bool_to_text $FLAG_CLOUDFLARE_ERROR)
+Internal Error: $(bool_to_text $FLAG_INTERNAL_ERROR)
+NOTA: Restart automático DESABILITADO - verificação manual pode ser necessária."
+
+    # Enviar alerta via WhatsApp (sem fazer restart)
+    send_notification "alerta" "API não está respondendo após $RETRY_COUNT tentativas (HTTP $API_HTTP_CODE). Restart automático está desabilitado. Verifique manualmente se necessário." ""
+
+    log_debug "[MONITOR] Verificação encerrada (API não respondia - sem restart automático)"
     write_monitor_result "$CYCLE_NUMBER"
     log_separator
     exit 0
@@ -1031,9 +1362,24 @@ else
         log_debug "[ETAPA 3] Consultando sessões ativas no banco Django..."
 
         QUERY="SELECT usuario, token FROM cadastros_sessaowpp WHERE is_active = 1;"
-        SESSIONS_DATA=$(sqlite3 -separator '|' "$DB_PATH" "$QUERY" 2>/dev/null)
+        SESSIONS_DATA=$(sqlite3 -separator '|' "$DB_PATH" "$QUERY" 2>&1)
+        SQLITE_EXIT_CODE=$?
 
-        if [ -z "$SESSIONS_DATA" ]; then
+        # Verificar se a consulta SQLite falhou
+        if [ $SQLITE_EXIT_CODE -ne 0 ]; then
+            log_debug "[ETAPA 3] ERRO: Falha na consulta SQLite (exit code: $SQLITE_EXIT_CODE)"
+            log_debug "[ETAPA 3] Mensagem de erro: $SESSIONS_DATA"
+            log_debug "[ETAPA 3] Possíveis causas:"
+            log_debug "[ETAPA 3]   - Banco de dados corrompido"
+            log_debug "[ETAPA 3]   - Banco de dados bloqueado (locked)"
+            log_debug "[ETAPA 3]   - Permissões insuficientes"
+            log_debug "[ETAPA 3]   - Tabela cadastros_sessaowpp não existe"
+            log_incident "ERRO SQLITE" "Falha ao consultar banco de dados.
+Exit code: $SQLITE_EXIT_CODE
+Erro: $SESSIONS_DATA
+Banco: $DB_PATH"
+            SESSIONS_DATA=""  # Limpar para evitar processamento incorreto
+        elif [ -z "$SESSIONS_DATA" ]; then
             log_debug "[ETAPA 3] Nenhuma sessão ativa encontrada no banco"
         else
             # Contar sessões
@@ -1106,6 +1452,9 @@ else
         log_debug "[ETAPA 4] OK: Nenhuma divergência detectada"
     fi
     echo "0" > "$DIVERGENCE_FILE"
+
+    # Limpar estado de problema persistente quando tudo está OK
+    clear_problem_state
 fi
 
 # Finalização - Log de debug

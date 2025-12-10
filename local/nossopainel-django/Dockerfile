@@ -75,20 +75,24 @@ RUN python3 -m playwright install-deps
 
 # Expõe a porta para o servidor
 EXPOSE 8001
+EXPOSE 8002
 
 # Healthcheck para verificar se o Django está respondendo
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \
     CMD curl -f http://localhost:8001/ || exit 1
 
-# Configuração do supervisord
+# Configuração do supervisord - Duas instâncias: NossoPainel (8001) e JampaBet (8002)
 RUN echo '[supervisord]' > /etc/supervisor/conf.d/django.conf && \
     echo 'nodaemon=true' >> /etc/supervisor/conf.d/django.conf && \
     echo 'logfile=/var/log/supervisor/supervisord.log' >> /etc/supervisor/conf.d/django.conf && \
     echo 'pidfile=/var/run/supervisord.pid' >> /etc/supervisor/conf.d/django.conf && \
     echo 'loglevel=info' >> /etc/supervisor/conf.d/django.conf && \
     echo '' >> /etc/supervisor/conf.d/django.conf && \
-    echo '[program:gunicorn]' >> /etc/supervisor/conf.d/django.conf && \
-    echo 'command=gunicorn setup.wsgi:application --bind 0.0.0.0:8001 --workers 3 --threads 2 --worker-class sync --timeout 120 --max-requests 1000 --max-requests-jitter 50 --access-logfile - --error-logfile - --log-level info --name nossopainel-django' >> /etc/supervisor/conf.d/django.conf && \
+    echo '# ===========================================' >> /etc/supervisor/conf.d/django.conf && \
+    echo '# NossoPainel - Porta 8001' >> /etc/supervisor/conf.d/django.conf && \
+    echo '# ===========================================' >> /etc/supervisor/conf.d/django.conf && \
+    echo '[program:nossopainel]' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'command=gunicorn setup.wsgi:application --bind 0.0.0.0:8001 --workers 2 --threads 2 --worker-class sync --timeout 120 --max-requests 1000 --max-requests-jitter 50 --access-logfile - --error-logfile - --log-level info --name nossopainel' >> /etc/supervisor/conf.d/django.conf && \
     echo 'directory=/home/django/app' >> /etc/supervisor/conf.d/django.conf && \
     echo 'autostart=true' >> /etc/supervisor/conf.d/django.conf && \
     echo 'autorestart=true' >> /etc/supervisor/conf.d/django.conf && \
@@ -100,6 +104,25 @@ RUN echo '[supervisord]' > /etc/supervisor/conf.d/django.conf && \
     echo 'startsecs=10' >> /etc/supervisor/conf.d/django.conf && \
     echo 'stopwaitsecs=30' >> /etc/supervisor/conf.d/django.conf && \
     echo '' >> /etc/supervisor/conf.d/django.conf && \
+    echo '# ===========================================' >> /etc/supervisor/conf.d/django.conf && \
+    echo '# JampaBet - Porta 8002' >> /etc/supervisor/conf.d/django.conf && \
+    echo '# ===========================================' >> /etc/supervisor/conf.d/django.conf && \
+    echo '[program:jampabet]' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'command=gunicorn setup.wsgi:application --bind 0.0.0.0:8002 --workers 2 --threads 2 --worker-class sync --timeout 120 --max-requests 1000 --max-requests-jitter 50 --access-logfile - --error-logfile - --log-level info --name jampabet' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'directory=/home/django/app' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'autostart=true' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'autorestart=true' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stdout_logfile=/dev/stdout' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stdout_logfile_maxbytes=0' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stderr_logfile=/dev/stderr' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'priority=1' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'startsecs=10' >> /etc/supervisor/conf.d/django.conf && \
+    echo 'stopwaitsecs=30' >> /etc/supervisor/conf.d/django.conf && \
+    echo '' >> /etc/supervisor/conf.d/django.conf && \
+    echo '# ===========================================' >> /etc/supervisor/conf.d/django.conf && \
+    echo '# Agendamentos (scripts em background)' >> /etc/supervisor/conf.d/django.conf && \
+    echo '# ===========================================' >> /etc/supervisor/conf.d/django.conf && \
     echo '[program:agendamentos]' >> /etc/supervisor/conf.d/django.conf && \
     echo 'command=python3 scripts/agendamentos.py' >> /etc/supervisor/conf.d/django.conf && \
     echo 'directory=/home/django/app' >> /etc/supervisor/conf.d/django.conf && \
@@ -123,13 +146,8 @@ RUN echo '[supervisord]' > /etc/supervisor/conf.d/django.conf && \
 RUN echo '#!/bin/bash' > /home/django/app/start.sh && \
     echo 'set -e' >> /home/django/app/start.sh && \
     echo '' >> /home/django/app/start.sh && \
-    echo 'echo "🚀 Iniciando aplicação Django em PRODUÇÃO..."' >> /home/django/app/start.sh && \
-    echo 'echo "================================================"' >> /home/django/app/start.sh && \
-    echo '' >> /home/django/app/start.sh && \
-    echo 'if [ "$DEBUG" = "True" ]; then' >> /home/django/app/start.sh && \
-    echo '    echo "⚠️  WARNING: DEBUG=True detectado em produção!"' >> /home/django/app/start.sh && \
-    echo '    echo "   Configure DEBUG=False no .env"' >> /home/django/app/start.sh && \
-    echo 'fi' >> /home/django/app/start.sh && \
+    echo 'echo "🚀 Iniciando aplicação Django (Desenvolvimento Local)..."' >> /home/django/app/start.sh && \
+    echo 'echo "========================================================"' >> /home/django/app/start.sh && \
     echo '' >> /home/django/app/start.sh && \
     echo 'echo "📦 Criando migrations..."' >> /home/django/app/start.sh && \
     echo 'python3 manage.py makemigrations --merge 2>/dev/null || echo "⚠️  Sem migrations para merge"' >> /home/django/app/start.sh && \
@@ -148,10 +166,11 @@ RUN echo '#!/bin/bash' > /home/django/app/start.sh && \
     echo '' >> /home/django/app/start.sh && \
     echo 'echo ""' >> /home/django/app/start.sh && \
     echo 'echo "✅ Inicializando serviços com Supervisor..."' >> /home/django/app/start.sh && \
-    echo 'echo "   📡 Gunicorn: 3 workers na porta 8001"' >> /home/django/app/start.sh && \
+    echo 'echo "   📡 NossoPainel: http://localhost:8001"' >> /home/django/app/start.sh && \
+    echo 'echo "   🎯 JampaBet:    http://localhost:8002"' >> /home/django/app/start.sh && \
     echo 'echo "   ⏰ Agendamentos: scripts rodando"' >> /home/django/app/start.sh && \
     echo 'echo "   📋 Logs: logs/Scheduler/"' >> /home/django/app/start.sh && \
-    echo 'echo "================================================"' >> /home/django/app/start.sh && \
+    echo 'echo "========================================================"' >> /home/django/app/start.sh && \
     echo 'echo ""' >> /home/django/app/start.sh && \
     echo '' >> /home/django/app/start.sh && \
     echo 'exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf' >> /home/django/app/start.sh && \

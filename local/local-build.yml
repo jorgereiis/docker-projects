@@ -1,3 +1,12 @@
+# ============================================
+# Desenvolvimento Local - NossoPainel & JampaBet
+# ============================================
+# Acesso:
+#   - NossoPainel: http://localhost:8001
+#   - JampaBet:    http://localhost:8002
+#   - Nginx:       http://localhost:8081
+# ============================================
+
 services:
 
   nginx:
@@ -34,10 +43,12 @@ services:
       - ./nossopainel-django/staticfiles:/home/django/app/staticfiles
       - ./nossopainel-django/telegram_bot.session:/home/django/app/telegram_bot.session
     ports:
-       - "8001:8001"
+      - "8001:8001"  # NossoPainel
+      - "8002:8002"  # JampaBet
     environment:
-      - TZ=America/Bahia
-      # Configuração MySQL
+      - DEBUG=True
+      - TZ=America/Recife
+      # Configuração MySQL (opcional - usa SQLite por padrão em dev)
       - DB_HOST=nossopainel-mysql
       - DB_PORT=3306
       - DB_NAME=nossopaineldb
@@ -45,7 +56,7 @@ services:
       - DB_PASSWORD=${MYSQL_PASSWORD}
     tty: true
     restart: always
-    
+
 networks:
   local-network:
     driver: bridge

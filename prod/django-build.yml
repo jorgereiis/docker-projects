@@ -1,6 +1,7 @@
 # ============================================
-# Django + Nginx + Certbot - Nosso Painel Gestão
+# Django + Nginx + Certbot - NossoPainel & JampaBet
 # SERVIDOR 1: Django + MySQL + Nginx + Certbot
+# Serve dois apps: nossopainel.com.br e jampabet.com.br
 # ============================================
 
 services:
@@ -74,6 +75,7 @@ services:
 
   # ==========================================
   # CERTBOT - Let's Encrypt SSL
+  # Certificados para NossoPainel e JampaBet
   # ==========================================
   nossopainel-certbot:
     image: certbot/certbot
@@ -88,7 +90,9 @@ services:
       --agree-tos
       --no-eff-email
       -d nossopainel.com.br
-      -d www.nossopainel.com.br"
+      -d www.nossopainel.com.br
+      -d jampabet.com.br
+      -d www.jampabet.com.br"
     networks:
       - public-network
 

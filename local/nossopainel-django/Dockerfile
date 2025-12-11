@@ -73,7 +73,7 @@ RUN pip3 install --no-cache-dir playwright==1.48.0 greenlet==3.1.1
 RUN python3 -m playwright install chromium
 RUN python3 -m playwright install-deps
 
-# Expõe a porta para o servidor
+# Expõe a porta para o servidorr
 EXPOSE 8001
 EXPOSE 8002
 

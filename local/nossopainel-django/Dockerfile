@@ -66,14 +66,14 @@ RUN mkdir -p /var/log/supervisor
 WORKDIR /home/django/app
 RUN pip3 install --default-timeout=150 --no-cache-dir -r requirements.txt
 
-# Instala Playwright explicitamente (garante instalação mesmo se falhou no requirements.txt)
+# Instala Playwright e Greenlet
 RUN pip3 install --no-cache-dir playwright==1.48.0 greenlet==3.1.1
 
 # Instala o navegador Chromium e dependências do Playwright
 RUN python3 -m playwright install chromium
 RUN python3 -m playwright install-deps
 
-# Expõe a porta para o servidorr
+# Expõe a porta para o servidor
 EXPOSE 8001
 EXPOSE 8002
 

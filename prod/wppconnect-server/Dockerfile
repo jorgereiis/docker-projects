@@ -12,7 +12,7 @@ WORKDIR /home/node/app
 
 COPY ./config.ts /home/node/app/src
 
-RUN yarn install
+RUN corepack enable && yarn install
 
 FROM node:22.21.1-bullseye
 WORKDIR /home/node/app

@@ -73,4 +73,5 @@ RUN wget -c https://dl.google.com/linux/direct/google-chrome-stable_current_amd6
     && rm google-chrome-stable_current_amd64.deb
 
 COPY --from=builder /home/node/app .
+RUN corepack enable
 EXPOSE 21465
